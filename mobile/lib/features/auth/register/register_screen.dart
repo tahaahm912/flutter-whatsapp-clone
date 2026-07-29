@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/widgets/app_button.dart';
 
 class RegisterScreen extends StatelessWidget{
   const RegisterScreen ({super.key});
@@ -9,12 +10,12 @@ class RegisterScreen extends StatelessWidget{
     return Scaffold(
       appBar: AppBar(title: const Text("Register")),
       body: Center(
-        child: ElevatedButton(
+        child: AppButton(
+          text: "Go To Home",
           onPressed: (){
-           context.go('/home');
-          },
-          child: const Text("Go To Home"),
-        ),
+            context.go('/home');
+          }
+        )
       ),
     );
   }
