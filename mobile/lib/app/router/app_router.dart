@@ -4,6 +4,7 @@ import '../../features/splash/splash_screen.dart';
 import '../../features/auth/login/login_screen.dart';
 import '../../features/auth/register/register_screen.dart';
 import '../../features/home/home_screen.dart';
+import 'package:mobile/features/auth/otp/otp_screen.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
@@ -23,6 +24,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/home',
       builder: (context, state) => const HomeScreen(),
+    ),
+    GoRoute(
+      path: '/otp',
+      builder: (context, state) => const OtpScreen(),
     ),
   ],
 );

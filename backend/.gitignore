@@ -1,0 +1,14 @@
+# Binaries
+/bin/
+*.exe
+*.test
+
+# Environment secrets - never commit real values
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
