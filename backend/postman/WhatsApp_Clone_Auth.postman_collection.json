@@ -62,6 +62,32 @@
       ]
     },
     {
+      "name": "2b. Resend OTP (optional - only if the code expired)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/resend-otp",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"{{identifier}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and sent true', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().sent).to.eql(true);",
+              "});",
+              "console.log('Check your server console for the new OTP code.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "3. Login",
       "request": {
         "method": "POST",

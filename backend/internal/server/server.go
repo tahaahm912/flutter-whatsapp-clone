@@ -56,6 +56,7 @@ func (s *Server) registerRoutes() {
 	authGroup := s.engine.Group("/auth")
 	authGroup.POST("/register", s.authHandler.Register)
 	authGroup.POST("/verify-otp", s.authHandler.VerifyOTP)
+	authGroup.POST("/resend-otp", s.authHandler.ResendOTP)
 	authGroup.POST("/login", s.authHandler.Login)
 	authGroup.POST("/refresh", s.authHandler.Refresh)
 	authGroup.POST("/logout", s.authHandler.Logout)

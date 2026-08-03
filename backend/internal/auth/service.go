@@ -30,8 +30,10 @@ var (
 	ErrAccountDisabled    = errors.New("this account is disabled")
 	ErrRefreshTokenInvalid = errors.New("refresh token is invalid")
 	ErrRefreshTokenExpired = errors.New("refresh token has expired — please log in again")
-	ErrTooManyAttempts    = otp.ErrTooManyAttempts
-	ErrInvalidOrExpired   = otp.ErrInvalidOrExpired
+	ErrAlreadyVerified     = errors.New("this account is already verified")
+	ErrTooManyAttempts     = otp.ErrTooManyAttempts
+	ErrInvalidOrExpired    = otp.ErrInvalidOrExpired
+	ErrTooSoon             = otp.ErrTooSoon
 )
 
 // Service holds everything auth needs: DB access, the OTP service,
@@ -157,6 +159,35 @@ func (s *Service) VerifyOTP(ctx context.Context, req VerifyOTPRequest) (*models.
 	user.AccountStatus = "active"
 
 	return &user, nil
+}
+
+// ResendOTP re-generates and "sends" (logs) a fresh OTP code for an
+// account that hasn't been verified yet. Added after discovering the
+// Flutter OTP screen already has a "Resend Code" button wired up for
+// this — it wasn't part of the original 5-endpoint auth plan, but the
+// client needs it, so it's added here rather than left as a dead button.
+func (s *Service) ResendOTP(ctx context.Context, identifier string) error {
+	var user models.User
+	if err := s.db.WithContext(ctx).
+		Where("phone_number = ? OR email = ?", identifier, identifier).
+		First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("failed to look up user: %w", err)
+	}
+
+	if user.AccountStatus == "active" {
+		return ErrAlreadyVerified
+	}
+
+	code, err := s.otp.Generate(ctx, identifier)
+	if err != nil {
+		return err // already otp.ErrTooSoon, mapped via the ErrTooSoon alias above
+	}
+
+	log.Printf("[DEV ONLY] Resent OTP for %s is: %s (expires in 5 minutes)", identifier, code)
+	return nil
 }
 
 // LoginResult is what Login returns — the handler converts this into

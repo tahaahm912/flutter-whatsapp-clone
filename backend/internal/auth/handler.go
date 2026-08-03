@@ -86,6 +86,34 @@ func (h *Handler) VerifyOTP(c *gin.Context) {
 	})
 }
 
+// ResendOTP handles POST /auth/resend-otp.
+func (h *Handler) ResendOTP(c *gin.Context) {
+	var req ResendOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if err := h.service.ResendOTP(c.Request.Context(), req.Identifier); err != nil {
+		switch {
+		case errors.Is(err, ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, ErrAlreadyVerified):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "ALREADY_VERIFIED"})
+		case errors.Is(err, ErrTooSoon):
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error(), "code": "OTP_RESEND_TOO_SOON"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, ResendOTPResponse{Sent: true})
+}
+
 // Login handles POST /auth/login.
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginRequest

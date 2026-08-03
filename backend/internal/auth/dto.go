@@ -40,6 +40,19 @@ type VerifyOTPResponse struct {
 	AccountStatus string `json:"account_status"`
 }
 
+// ResendOTPRequest is the expected JSON body for POST /auth/resend-otp.
+type ResendOTPRequest struct {
+	Identifier string `json:"identifier" binding:"required"`
+}
+
+// ResendOTPResponse confirms a new code was generated. The code
+// itself is never in the response — same reasoning as everywhere
+// else in this file: never put the actual code in an API response,
+// only in the (dev-only, temporary) server log.
+type ResendOTPResponse struct {
+	Sent bool `json:"sent"`
+}
+
 // LoginRequest is the expected JSON body for POST /auth/login.
 // device_name/platform are optional and describe the session being
 // created; Postman testers can omit them and get sensible defaults.

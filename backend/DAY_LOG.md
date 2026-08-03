@@ -351,9 +351,6 @@ green before Day 1 of Week 2.
 **Next up (Week 2, Day 1):** Build `POST /auth/register` with request
 validation (name, phone/email, password). Checkpoint: register
 endpoint returns 201 in Postman.
-
----
-
 ## Week 2, Day 1 — POST /auth/register
 
 **Goal (from schedule):** Build POST /auth/register with request
@@ -779,3 +776,71 @@ down for this one — nothing to confirm until it's back).
 
 **Next up (Week 3, Day 1):** Build the JWT authentication middleware
 that protects routes going forward.
+
+---
+
+## Merge Day — Reconciling with the actual shared repo + resend-OTP + API contract review
+
+**Context:** the zips delivered for Week 2 Days 1-5 (above) were never
+pushed to this repo — the repo was still at Week 1 Day 4 when this
+was checked. All of Week 2's code (above) has now been merged directly
+on top of this actual repo's backend, verified structurally (package
+alignment, brace/paren balance, no duplicate declarations, no
+cross-file signature mismatches — the same checks described in each
+day's entry above), and confirmed the module name (`whatsapp-clone-backend`)
+and Go version (`go 1.25`) already in this repo's `go.mod` needed no
+changes — only additions.
+
+**`go.mod` changes:** added `github.com/golang-jwt/jwt/v5` as a new
+direct dependency, and promoted `golang.org/x/crypto` from indirect to
+direct (it was already resolved in `go.sum` as a transitive dependency
+at v0.23.0 — same version, now just used directly for `bcrypt`). One
+action needed on your end: run `go mod tidy` once after pulling this,
+since `golang-jwt/jwt/v5` is a new module not yet in `go.sum` — this is
+a normal one-time step, not an error.
+
+**New: `POST /auth/resend-otp`.** Found while reviewing the actual
+Flutter code (see API contract review below) — the OTP screen already
+has a "Resend Code" button wired for a future API call that didn't
+exist yet. Added `internal/auth/service.go`'s `ResendOTP`, with a
+60-second per-identifier cooldown (via Redis `SETNX`) to prevent abuse,
+consistent with the rate-limiting principle from the original security
+plan. Documented in both the Postman collection and `docs/openapi.yaml`.
+
+**New: `docs/API_CONTRACT_REVIEW.md`.** A real review of all 5 (now 6)
+backend endpoints against Member 1's actual Flutter screens — not just
+the original plan. Findings: field names and validation rules are
+compatible as-is; one integration TODO flagged for Member 1 (the
+register→OTP screen needs to pass the real identifier instead of a
+hardcoded placeholder); two UI elements (forgot password, Google
+sign-in) have no backend support and shouldn't be wired to anything
+yet.
+
+**Files changed/added in this merge, on top of the actual repo:**
+- `internal/auth/` (entire package — register, verify-otp, resend-otp,
+  login, refresh, logout)
+- `internal/otp/` (entire package, now with resend cooldown)
+- `internal/models/device.go`, `internal/models/refresh_token.go`, and
+  an updated `internal/models/user.go`
+- `internal/config/config.go` — added `JWTSecret`
+- `internal/server/server.go`, `cmd/api/main.go` — wire everything up
+- `migrations/000002_*`, `migrations/000003_*`
+- `.env.example` — added `JWT_SECRET`
+- `postman/WhatsApp_Clone_Auth.postman_collection.json`
+- `docs/openapi.yaml`, `docs/API_CONTRACT_REVIEW.md`
+
+**Your steps:**
+```bash
+go mod tidy       # picks up golang-jwt/jwt/v5
+make migrate-up   # applies 000002 and 000003
+cp .env.example .env   # if not already done — picks up JWT_SECRET
+make run
+```
+Then run the Postman collection (updated with the new resend-otp
+request) end to end.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 3, Day 1):** Build the JWT authentication middleware
+that protects routes going forward.
+

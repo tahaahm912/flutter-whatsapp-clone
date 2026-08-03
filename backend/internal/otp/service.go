@@ -18,15 +18,17 @@ import (
 )
 
 const (
-	codeLength  = 6
-	ttl         = 5 * time.Minute
-	maxAttempts = 5
+	codeLength      = 6
+	ttl             = 5 * time.Minute
+	maxAttempts     = 5
+	resendCooldown  = 60 * time.Second
 )
 
 // Sentinel errors the auth handler maps to specific HTTP status codes.
 var (
-	ErrTooManyAttempts = errors.New("too many incorrect attempts — request a new code")
+	ErrTooManyAttempts  = errors.New("too many incorrect attempts — request a new code")
 	ErrInvalidOrExpired = errors.New("invalid or expired code")
+	ErrTooSoon          = errors.New("please wait before requesting another code")
 )
 
 // Service generates and verifies OTP codes.
@@ -47,13 +49,31 @@ func attemptsKey(identifier string) string {
 	return fmt.Sprintf("otp:attempts:%s", identifier)
 }
 
+func cooldownKey(identifier string) string {
+	return fmt.Sprintf("otp:cooldown:%s", identifier)
+}
+
 // Generate creates a fresh 6-digit numeric code, stores a hash of it
 // in Redis with a TTL, resets the attempt counter for this
 // identifier, and returns the raw code to the caller so it can be
 // "sent". There's no SMS/email provider wired up yet (that's outside
 // V1's free-to-build scope) — callers should log the code for manual
 // testing until a provider is added.
+//
+// A short cooldown (60s) is enforced per identifier via Redis SETNX,
+// so this same method safely powers both the initial send (at
+// registration) and "resend code" (added for the OTP screen's resend
+// button) — the very first call always succeeds since no cooldown key
+// exists yet; only rapid repeats are rejected with ErrTooSoon.
 func (s *Service) Generate(ctx context.Context, identifier string) (string, error) {
+	acquired, err := s.redis.SetNX(ctx, cooldownKey(identifier), "1", resendCooldown).Result()
+	if err != nil {
+		return "", fmt.Errorf("failed to check resend cooldown: %w", err)
+	}
+	if !acquired {
+		return "", ErrTooSoon
+	}
+
 	code, err := generateNumericCode(codeLength)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate code: %w", err)

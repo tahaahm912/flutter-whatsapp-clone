@@ -100,6 +100,35 @@ paths:
         "429":
           description: Too many incorrect attempts — request a new code
 
+  /auth/resend-otp:
+    post:
+      summary: Generate and re-send a fresh OTP code for an unverified account
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier]
+              properties:
+                identifier: { type: string }
+      responses:
+        "200":
+          description: A new code was generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean, example: true }
+        "400":
+          description: Account is already verified
+        "404":
+          description: No account found for that identifier
+        "429":
+          description: Requested again too soon (60 second cooldown per identifier)
+
   /auth/login:
     post:
       summary: Authenticate and receive an access + refresh token pair
