@@ -26,7 +26,7 @@ func main() {
 	}
 	log.Println("connected to redis successfully")
 
-	srv := server.New(database, redisClient)
+	srv := server.New(database, redisClient, cfg.JWTSecret)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("starting server on %s", addr)

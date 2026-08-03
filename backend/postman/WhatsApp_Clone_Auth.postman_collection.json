@@ -1,0 +1,170 @@
+{
+  "info": {
+    "name": "WhatsApp Clone - Auth (Week 2)",
+    "description": "All 5 authentication endpoints. Run in order: Register -> Verify OTP -> Login -> Refresh -> Logout. Login and Refresh auto-capture their tokens into collection variables via test scripts, so Refresh and Logout work with zero manual copy-pasting once Login has run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "identifier", "value": "+14155552671" },
+    { "key": "password", "value": "correcthorsebattery" },
+    { "key": "otp_code", "value": "REPLACE_ME_FROM_SERVER_CONSOLE" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Register",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Test User\",\n  \"phone_number\": \"{{identifier}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+              "console.log('Check your server console for the OTP code, then paste it into the otp_code collection variable before running the next request.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Verify OTP",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/verify-otp",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"code\": \"{{otp_code}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and account is active', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().account_status).to.eql('active');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"password\": \"{{password}}\",\n  \"device_name\": \"Postman\",\n  \"platform\": \"web\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and tokens are present', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.access_token).to.be.a('string').and.not.empty;",
+              "  pm.expect(data.refresh_token).to.be.a('string').and.not.empty;",
+              "  pm.collectionVariables.set('access_token', data.access_token);",
+              "  pm.collectionVariables.set('refresh_token', data.refresh_token);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Refresh",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/refresh",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and tokens rotated', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.access_token).to.be.a('string').and.not.empty;",
+              "  pm.expect(data.refresh_token).to.not.eql(pm.collectionVariables.get('refresh_token'));",
+              "  pm.collectionVariables.set('access_token', data.access_token);",
+              "  pm.collectionVariables.set('refresh_token', data.refresh_token);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Logout",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/auth/logout",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and success true', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().success).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200, db and redis ok', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.database).to.eql('ok');",
+              "  pm.expect(data.redis).to.eql('ok');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
