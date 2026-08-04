@@ -29,6 +29,7 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   pinput: ^5.0.1
+  dio: ^5.9.0
   flutter:
     sdk: flutter
 
