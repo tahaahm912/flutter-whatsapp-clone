@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+
 import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/core/widgets/app_button.dart';
 import 'package:mobile/core/widgets/app_text_field.dart';
+
+import 'package:mobile/features/auth/data/models/register_request.dart';
+import 'package:mobile/features/auth/data/repositories/auth_repository.dart';
+import 'package:mobile/features/auth/data/services/auth_api_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,7 +24,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _isLoading = false;
   final _formKey = GlobalKey<FormState>();
+  late final AuthRepository _repository;
+
+@override
+void initState() {
+  super.initState();
+
+  final apiService = AuthApiService();
+  _repository = AuthRepository(apiService);
+}
 
 @override
 void dispose() {
@@ -29,6 +44,49 @@ void dispose() {
   _confirmPasswordController.dispose();
   super.dispose();
 }
+
+Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final request = RegisterRequest(
+        name: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      final response = await _repository.register(request);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(response.message)),
+      );
+
+      context.go('/otp');
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,11 +240,7 @@ void dispose() {
 
                 AppButton(
                   text: "Sign Up",
-                  onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      context.go('/otp');
-                    }
-                  },
+                  onPressed: _register,
                 ),
 
                 const SizedBox(height: 28),
