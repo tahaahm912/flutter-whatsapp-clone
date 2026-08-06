@@ -844,3 +844,391 @@ request) end to end.
 **Next up (Week 3, Day 1):** Build the JWT authentication middleware
 that protects routes going forward.
 
+
+---
+
+## Week 3, Day 1 — JWT Authentication Middleware
+
+**Goal (from schedule):** Add JWT middleware to Gin that validates the
+Authorization header on protected routes. Checkpoint (shared with
+Member 1): ApiClient successfully calls /health with an auth header
+attached.
+
+**Note on scope:** today's Flutter-side task (add Dio, build an
+ApiClient with interceptors) isn't mine to build — this entry covers
+Member 2's half only: the middleware itself, plus a protected route
+for Member 1 to actually test their new ApiClient against once it
+exists.
+
+**What's included in today's package:**
+- `internal/middleware/auth.go` — new package. `RequireAuth(jwtSecret)`
+  returns Gin middleware that:
+  1. Rejects requests with no `Authorization` header (`401`,
+     `AUTH_HEADER_MISSING`).
+  2. Rejects malformed headers not in the exact `Bearer <token>` form
+     (`401`, `AUTH_HEADER_MALFORMED`).
+  3. Validates the JWT using the same `auth.ParseAccessToken` built on
+     Week 2 Day 3 — distinguishes an **expired** token
+     (`TOKEN_EXPIRED`) from any other invalid token (`TOKEN_INVALID`),
+     so the client can tell "refresh your token" apart from "something
+     is actually wrong."
+  4. On success, stores `user_id`/`device_id` in the Gin context so
+     any handler behind this middleware can read who's making the
+     request — this is what Week 4's `GET /users/me` will rely on.
+- `internal/server/server.go` — registers `GET /health/protected`
+  behind `RequireAuth`, purely as a test route for today's checkpoint.
+  It intentionally does **not** protect the real `/health` — that
+  needs to stay open for uptime monitors/load balancers, which don't
+  carry user JWTs.
+- `postman/WhatsApp_Clone_Auth.postman_collection.json` — two new
+  requests: one hitting `/health/protected` with `{{access_token}}`
+  attached (expect `200`), one without any token (expect `401`,
+  `AUTH_HEADER_MISSING`).
+- `docs/openapi.yaml` — documents `/health/protected` and introduces
+  the `bearerAuth` security scheme actually being used now.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+1. Run the Postman collection through Login (captures `access_token`).
+2. Run "Health Check (Protected - needs auth header)" → expect `200`
+   with `authenticated_as.user_id` matching the user you logged in as.
+3. Run "Health Check (Protected - no token, expect 401)" → expect
+   `401`, `AUTH_HEADER_MISSING`.
+4. Optional manual check — edit one character of a valid
+   `access_token` and resend → expect `401`, `TOKEN_INVALID`.
+
+**For Member 1 (once your ApiClient exists):** point it at
+`GET {{base_url}}/health/protected` with your interceptor attaching
+`Authorization: Bearer <token>` — that's today's actual shared
+checkpoint.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 3, Day 2):** Test the middleware against a protected
+test route; confirm it rejects missing/invalid tokens (Member 1
+connects the Register screen to the real API this same day).
+
+---
+
+## Week 3, Day 2 — Testing the Middleware
+
+**Goal (from schedule):** Test the middleware against a protected test
+route; confirm it rejects missing/invalid tokens. Checkpoint (shared):
+Register screen creates a real account through the live API (Member 1's
+half — connecting the Register screen to `/auth/register`).
+
+**What's included in today's package:**
+- `internal/middleware/auth_test.go` — real, automated Go tests
+  (`go test ./...` picks these up automatically via the `make test`
+  target from Week 1). Beyond what Postman covered on Day 1, this adds
+  cases Postman can't easily produce without hand-crafting a JWT:
+  - Header present but missing the `Bearer` prefix
+  - `Bearer` with an empty token
+  - A structurally invalid token
+  - **A token signed with the wrong secret** (simulates a forged/
+    tampered token)
+  - **A genuinely expired token** (built with a past `exp` claim, not
+    just "wait 15 minutes and see") — confirms it gets the distinct
+    `TOKEN_EXPIRED` code, not just `TOKEN_INVALID`
+  - A valid token, confirming both a `200` and that `user_id`/
+    `device_id` land correctly in the request context — not just "the
+    middleware didn't reject it," but "the right identity came through,"
+    since Week 4's `GET /users/me` depends on that being correct.
+
+**Why real Go tests instead of only more Postman requests:** Postman
+is the right tool for "does the end-to-end HTTP flow work" (Day 1's
+job). It's the wrong tool for adversarial edge cases like a wrong-secret
+or already-expired token — those need to be constructed directly, and
+a test suite that runs in CI going forward (see Week 8) catches
+regressions here automatically instead of relying on someone
+remembering to re-test manually.
+
+**Your steps to test this:**
+
+```bash
+go mod tidy   # if you haven't since Day 1's middleware was added
+make test
+```
+Expected: all tests pass, e.g.
+```
+--- PASS: TestRequireAuth (0.00s)
+    --- PASS: TestRequireAuth/missing_Authorization_header_is_rejected
+    --- PASS: TestRequireAuth/header_without_Bearer_prefix_is_rejected
+    ... (7 subtests total)
+--- PASS: TestRequireAuth_SetsContextValues (0.00s)
+PASS
+```
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 3, Day 3):** Refine token expiry handling and
+standardize error codes (`INVALID_OTP`, `OTP_EXPIRED`, etc.) — Member 1
+connects the OTP Verification screen to `/auth/verify-otp` this same
+day.
+
+---
+
+## Week 3, Day 3 — Refined Expiry Handling + Standardized Error Codes
+
+**Goal (from schedule):** Refine token expiry handling and standardize
+error codes (INVALID_OTP, OTP_EXPIRED, etc.). Checkpoint (shared): OTP
+verification screen works end-to-end against the real backend
+(Member 1's half — connecting the OTP screen to `/auth/verify-otp`).
+
+**What "refine token expiry handling" actually meant here:**
+`otp.Service.Verify` previously returned one combined error
+(`ErrInvalidOrExpired`) for two different situations: a wrong code,
+and a code that genuinely expired (or was never requested). These are
+now split:
+- Redis key gone entirely → `otp.ErrExpired` → `OTP_EXPIRED`
+- Redis key present but hash doesn't match → `otp.ErrInvalidCode` →
+  `INVALID_OTP`
+
+This doesn't weaken brute-force protection — the 5-attempt cap applies
+identically either way — it just gives an accurate message ("your code
+expired, request a new one" vs. "that's the wrong code, try again").
+
+**What "standardize error codes" meant, done as a full pass, not just
+OTP:** every error response across all 6 endpoints now has the same
+shape: `{"error": "...", "code": "MACHINE_READABLE_CODE"}`, including
+several that previously had no `code` at all (register's
+`IDENTIFIER_REQUIRED`/`IDENTIFIER_TAKEN`, every endpoint's validation
+failures now say `VALIDATION_ERROR`, every internal failure now says
+`INTERNAL_ERROR`, every "user not found" edge case now says
+`USER_NOT_FOUND`). Full reference table added to the top of
+`docs/openapi.yaml`.
+
+**Files changed:**
+- `internal/otp/service.go` — `ErrInvalidOrExpired` split into
+  `ErrInvalidCode` / `ErrExpired`.
+- `internal/auth/service.go` — updated error aliases
+  (`ErrInvalidOTP`/`ErrOTPExpired`) to match.
+- `internal/auth/handler.go` — full rewrite of every error branch
+  across all 6 handlers for consistent `code` fields (see file header
+  comment for the exact contract now in place).
+- `postman/WhatsApp_Clone_Auth.postman_collection.json` — added
+  request "1b. Verify OTP with wrong code" **positioned correctly
+  before the real verify consumes the code** (a wrong-code test placed
+  after a successful verify would hit `OTP_EXPIRED` instead of
+  `INVALID_OTP`, since the code would already be deleted — caught this
+  ordering issue myself while building it, fixed before packaging).
+- `docs/openapi.yaml` — full error code reference table added to the
+  spec description; updated verify-otp response docs; version bumped
+  to 0.3.0.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection in order — the new "1b" request should
+return `400` with `code: "INVALID_OTP"`, then request "2" (the real
+code) should still succeed normally (the wrong attempt just counts
+toward the 5-attempt budget, doesn't block it).
+
+To see `OTP_EXPIRED` specifically: register a new user, wait 5+
+minutes without verifying, then attempt verify-otp — expect `400`,
+`code: "OTP_EXPIRED"`.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 3, Day 4):** Implement session validation logic used
+by the middleware — Member 1 connects the Login screen to
+`/auth/login` and stores tokens via `flutter_secure_storage` this same
+day.
+
+---
+
+## Week 3, Day 4 — Session Validation Logic
+
+**Goal (from schedule):** Implement session validation logic used by
+the middleware. Checkpoint (shared): logging in stores the JWT
+securely on the device (Member 1's half — Login screen +
+flutter_secure_storage).
+
+**The gap this closes:** the middleware (Day 1) only ever checked that
+a JWT was cryptographically valid and unexpired. It never checked
+whether the *session* behind that token was still supposed to be
+valid. Since access tokens live 15 minutes, logging out (Week 2 Day 5,
+which revokes the device row) didn't actually stop a still-unexpired
+token from working for up to 15 more minutes. That's the real "session
+validation logic" this day is about.
+
+**What's included in today's package:**
+- `internal/middleware/auth.go` — added a `DeviceChecker` interface
+  (`IsDeviceActive(ctx, deviceID) (bool, error)`) and its real
+  implementation, `GormDeviceChecker`, backed by the `devices` table.
+  `RequireAuth` now takes a `DeviceChecker` as a second argument and,
+  after validating the JWT itself, confirms the token's device is
+  still `active` — rejecting with `401 SESSION_REVOKED` if not.
+  Defined as an interface specifically so tests don't need a real
+  database (see below).
+- `internal/server/server.go` — wires up `middleware.NewGormDeviceChecker(database)`
+  once in `Server`, reused by every protected route going forward.
+- `internal/middleware/auth_test.go` — added `fakeDeviceChecker` (no
+  DB needed at all) and two new cases: a valid token whose device is
+  revoked (`SESSION_REVOKED`), and a device-check failure surfacing as
+  `500 INTERNAL_ERROR` rather than silently letting the request through.
+- `postman/WhatsApp_Clone_Auth.postman_collection.json` — added
+  request "6. Health Check (Protected) after Logout", demonstrating
+  the actual feature: the same access token that worked right after
+  login gets `401 SESSION_REVOKED` right after logout, despite still
+  being unexpired.
+
+**A real ordering bug caught before packaging:** the two existing
+protected-route Postman requests were positioned *after* Refresh and
+Logout in the collection. Since Logout now revokes the device, running
+the full collection top-to-bottom would have made the "should succeed"
+protected-route request unexpectedly fail. Reordered them to run right
+after Login instead (renamed "3b"/"3c" to reflect the new position),
+before Refresh/Logout touch the session at all. Verified the new
+"after logout" request still works correctly even though Refresh (which
+runs before Logout) rotates the access token in between — Refresh
+issues a new token for the *same* device, so Logout still revokes it.
+- `docs/openapi.yaml` — documented `SESSION_REVOKED` in both the error
+  code table and the `/health/protected` endpoint description.
+
+**Your steps to test this:**
+
+```bash
+make test    # confirms the new middleware unit tests pass
+make run
+```
+Run the Postman collection in full order. Request "3b" should succeed
+(`200`) right after login; request "6" (after Logout) should fail with
+`401 SESSION_REVOKED` using what's still a structurally valid,
+unexpired token.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 3, Day 5):** Code review the backend auth module
+together with Member 1 (Member 1 adds a GoRouter auth guard so
+logged-in users skip Login and land on Home). Checkpoint: the app
+remembers login state after a restart.
+
+---
+
+## Week 3, Day 6 (milestone, together) — Gate Check 1
+
+**Goal (from schedule):** Full manual test together: Register → OTP →
+Create Password → Login → Home screen, on a real device/emulator.
+Checkpoint: GATE CHECK 1 PASSED — authentication works fully
+end-to-end.
+
+**Backend readiness confirmed today:** re-ran the full structural
+verification suite (brace/paren balance, no duplicate declarations, no
+clipped comments) across all 16 Go files, 6 migrations, and the one
+test file — all clean. Every route from the original 5+1 endpoint plan
+is registered and wired to the middleware correctly (see the route
+list in `internal/server/server.go`).
+
+**What's added today:** `docs/GATE_CHECK_1_TEST_SCRIPT.md` — a
+step-by-step walkthrough for the actual joint manual test, covering
+Register → OTP (including a deliberate wrong-code attempt) → Login →
+the real Day 4 checkpoint (token persists across an app restart) →
+Logout, with a Postgres query at each step so you can verify backend
+state matches what the app shows on screen, not just trust the UI.
+
+**Open question flagged in the script:** the schedule lists "Create
+Password" as its own step in the flow. The backend has one
+`POST /auth/register` call (name + phone/email + password together) —
+there's no separate "create account" then "set password" pair of
+endpoints. If Flutter's UI has a distinct Create Password *screen*
+that's fine (multi-step form, one final submit), but if it was
+expected to be a second API call, that's a design conversation to have
+before running the rest of the script.
+
+**This is a joint milestone day, not a solo backend day** — today's
+real work is doing the walkthrough together and marking off the
+checklist honestly, not writing more code. If any step breaks, note
+exactly where and that becomes the next concrete fix, not a failure of
+the process.
+
+**Checkpoint status:** ⬜ GATE CHECK 1 — pending the actual joint
+walkthrough.
+
+**Next up (Week 4, Day 1):** Build `GET /users/me` to return the
+logged-in user's real data (Member 1 builds the Profile screen UI this
+same day).
+
+---
+
+## Bug Fix — UUID Type Mismatch in Registration
+
+**Reported by Taha AK:** `POST /auth/register` failed with
+`ERROR: invalid input syntax for type uuid: ""`.
+
+**Root cause (mine to own, not a misunderstanding on the report's
+part):** the `users.id` column is `UUID PRIMARY KEY DEFAULT
+gen_random_uuid()`, but every model (`User.ID`, `Device.ID`,
+`RefreshToken.ID`, plus the `UserID`/`DeviceID` foreign key fields)
+was typed as plain Go `string`. GORM only knows to omit a blank
+primary key and let a database-side `DEFAULT` apply if GORM itself is
+told about that default — either via an explicit `gorm:"default:..."`
+tag, or by having created the table itself via `AutoMigrate`. This
+project deliberately never uses `AutoMigrate` (schema is owned
+entirely by the SQL migration files, so it can't silently drift), and
+no `default:` tag was ever added. So GORM had no way to know the
+column had a default — it just saw a Go string at its zero value
+(`""`) and dutifully sent exactly that as the literal value to insert,
+which Postgres correctly rejected as invalid UUID syntax. This was a
+real gap in earlier verification: I checked that everything compiled
+and that queries/types lined up structurally, but never actually
+traced GORM's specific behavior for a blank primary key against a
+DB-side default it doesn't know about — an assumption I stated
+earlier as fact without having verified it.
+
+**The fix:** rather than the minimal patch (add a `default:` tag and
+hope GORM's default-detection kicks in correctly), every ID field
+across `User`, `Device`, and `RefreshToken` is now `uuid.UUID`
+(`github.com/google/uuid`), and each model has an explicit
+`BeforeCreate` hook that generates a real UUID in Go code before every
+insert:
+```go
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.ID == uuid.Nil {
+		u.ID = uuid.New()
+	}
+	return nil
+}
+```
+This removes any dependency on GORM's default-detection heuristics
+entirely — there's no "hope it works," the value is always explicitly
+set before GORM ever builds the INSERT statement.
+
+**Why this didn't cascade into "many files fail to compile"** (the
+problem hit when this was first attempted manually): `uuid.UUID` is
+kept scoped to the database/model layer only. At the two places IDs
+cross a serialization boundary — JWT claims and JSON API responses —
+they're converted explicitly with `.String()`. Internally (model → DB
+query, model → model field assignment), the types already match
+directly with zero conversion needed, since e.g. `Device.UserID` and
+`User.ID` are now both `uuid.UUID`. Total footprint: 3 model files
+rewritten, 5 `.String()` conversions added (2 in `service.go`'s
+`generateAccessToken` calls, 3 in `handler.go`'s response construction),
+zero changes to `internal/middleware/`, zero changes to
+`auth_test.go`, zero changes to the JSON API contract (every response
+field is still a plain string `"id"` — Flutter needs no changes at
+all), zero changes to the SQL migrations (the schema was already
+correct; this was purely a Go-side bug).
+
+**Files changed:**
+- `internal/models/user.go`, `device.go`, `refresh_token.go` — `uuid.UUID` + `BeforeCreate`
+- `internal/auth/handler.go` — 3 `.String()` conversions on response construction
+- `internal/auth/service.go` — 2 `.String()` conversions on `generateAccessToken` calls
+- `go.mod` — added `github.com/google/uuid`
+
+**Your steps:**
+```bash
+go mod tidy   # fetches github.com/google/uuid, one-time step
+make run
+```
+Then re-run the Postman collection's Register request — should now
+return `201` with a real UUID in `id`, and:
+```bash
+psql whatsapp_clone -c "SELECT id, phone_number, account_status FROM users ORDER BY created_at DESC LIMIT 1;"
+```
+should show a properly generated UUID, not an error.

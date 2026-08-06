@@ -8,7 +8,7 @@ class ApiConstants{
   static const String windows = "http://localhost:8081";
 
   //Android Phone
-  static const String android = "http://192.168.0.107:8081";
+  static const String android = "http://192.168.0.104:8081";
 
    // Active Base URL
   static const String baseUrl = android;

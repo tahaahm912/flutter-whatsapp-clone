@@ -240,6 +240,7 @@ Future<void> _register() async {
 
                 AppButton(
                   text: "Sign Up",
+                  isLoading: _isLoading,
                   onPressed: _register,
                 ),
 

@@ -1,13 +1,48 @@
 openapi: 3.0.3
 info:
   title: WhatsApp Clone - Backend API
-  description: >
-    Week 1-2 API surface: health check and the 5 authentication
-    endpoints. Paste this file into https://editor.swagger.io to
-    browse it interactively, or import it directly into Postman
-    (File > Import) as an alternative to the hand-built collection in
-    /postman.
-  version: "0.2.0"
+  description: |
+    Week 1-3 API surface: health check (public + JWT-protected variant)
+    and the 6 authentication endpoints. Paste this file into
+    https://editor.swagger.io to browse it interactively, or import it
+    directly into Postman (File > Import) as an alternative to the
+    hand-built collection in /postman.
+
+    ## Error response shape (standardized, Week 3 Day 3)
+
+    Every error response has the same shape:
+    ```json
+    { "error": "human-readable message", "code": "MACHINE_READABLE_CODE" }
+    ```
+    Request validation failures also include a `details` field with
+    the raw binding error. Always branch on `code`, not on `error`
+    (message text may change without notice; codes won't).
+
+    ## All error codes currently in use
+
+    | Code | HTTP status | Where |
+    |---|---|---|
+    | `VALIDATION_ERROR` | 400 | any endpoint, malformed request body |
+    | `IDENTIFIER_REQUIRED` | 400 | register |
+    | `IDENTIFIER_TAKEN` | 409 | register |
+    | `INVALID_OTP` | 400 | verify-otp — wrong code |
+    | `OTP_EXPIRED` | 400 | verify-otp — code expired or never requested |
+    | `OTP_TOO_MANY_ATTEMPTS` | 429 | verify-otp |
+    | `ALREADY_VERIFIED` | 400 | resend-otp |
+    | `OTP_RESEND_TOO_SOON` | 429 | resend-otp — 60s cooldown |
+    | `INVALID_CREDENTIALS` | 401 | login — also used for "no such account" (never distinguished, by design) |
+    | `ACCOUNT_NOT_VERIFIED` | 403 | login |
+    | `ACCOUNT_DISABLED` | 403 | login |
+    | `REFRESH_TOKEN_INVALID` | 401 | refresh |
+    | `REFRESH_TOKEN_EXPIRED` | 401 | refresh |
+    | `USER_NOT_FOUND` | 404 | verify-otp, resend-otp, refresh (edge cases) |
+    | `AUTH_HEADER_MISSING` | 401 | any route behind RequireAuth |
+    | `AUTH_HEADER_MALFORMED` | 401 | any route behind RequireAuth |
+    | `TOKEN_INVALID` | 401 | any route behind RequireAuth |
+    | `TOKEN_EXPIRED` | 401 | any route behind RequireAuth |
+    | `SESSION_REVOKED` | 401 | any route behind RequireAuth — token is valid/unexpired but its device was logged out |
+    | `INTERNAL_ERROR` | 500 | any endpoint, unexpected failure |
+  version: "0.3.0"
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -29,6 +64,33 @@ paths:
                   database: { type: string, example: ok }
                   redis: { type: string, example: ok }
                   time: { type: string, format: date-time }
+
+  /health/protected:
+    get:
+      summary: Same as /health, but requires a valid JWT (test route for the auth middleware)
+      tags: [System]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Authenticated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  authenticated_as:
+                    type: object
+                    properties:
+                      user_id: { type: string, format: uuid }
+                      device_id: { type: string, format: uuid }
+        "401":
+          description: >
+            Missing, malformed, invalid, or expired token, OR a
+            valid/unexpired token whose device was revoked via logout
+            (code=SESSION_REVOKED) — see the response body's `code`
+            field to distinguish these.
 
   /auth/register:
     post:
@@ -94,11 +156,14 @@ paths:
                   verified: { type: boolean, example: true }
                   account_status: { type: string, example: active }
         "400":
-          description: Invalid or expired code
+          description: >
+            Wrong code (code=INVALID_OTP) or code expired/never
+            requested (code=OTP_EXPIRED) — see the response body's
+            `code` field to distinguish them.
         "404":
-          description: No account found for that identifier
+          description: No account found for that identifier (code=USER_NOT_FOUND)
         "429":
-          description: Too many incorrect attempts — request a new code
+          description: Too many incorrect attempts — request a new code (code=OTP_TOO_MANY_ATTEMPTS)
 
   /auth/resend-otp:
     post:

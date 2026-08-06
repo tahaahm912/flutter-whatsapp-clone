@@ -32,7 +32,8 @@ var (
 	ErrRefreshTokenExpired = errors.New("refresh token has expired — please log in again")
 	ErrAlreadyVerified     = errors.New("this account is already verified")
 	ErrTooManyAttempts     = otp.ErrTooManyAttempts
-	ErrInvalidOrExpired    = otp.ErrInvalidOrExpired
+	ErrInvalidOTP          = otp.ErrInvalidCode
+	ErrOTPExpired          = otp.ErrExpired
 	ErrTooSoon             = otp.ErrTooSoon
 )
 
@@ -132,7 +133,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*models.Us
 // when that identifier was verified.
 func (s *Service) VerifyOTP(ctx context.Context, req VerifyOTPRequest) (*models.User, error) {
 	if err := s.otp.Verify(ctx, req.Identifier, req.Code); err != nil {
-		return nil, err // already one of otp.ErrTooManyAttempts / otp.ErrInvalidOrExpired
+		return nil, err // already one of otp.ErrTooManyAttempts / otp.ErrInvalidCode / otp.ErrExpired
 	}
 
 	var user models.User
@@ -253,7 +254,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, er
 		return nil, fmt.Errorf("failed to register device: %w", err)
 	}
 
-	accessToken, expiresAt, err := generateAccessToken(s.jwtSecret, user.ID, device.ID)
+	accessToken, expiresAt, err := generateAccessToken(s.jwtSecret, user.ID.String(), device.ID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +356,7 @@ func (s *Service) Refresh(ctx context.Context, rawToken string) (*LoginResult, e
 		return nil, fmt.Errorf("failed to look up user: %w", err)
 	}
 
-	accessToken, expiresAt, err := generateAccessToken(s.jwtSecret, user.ID, record.DeviceID)
+	accessToken, expiresAt, err := generateAccessToken(s.jwtSecret, user.ID.String(), record.DeviceID.String())
 	if err != nil {
 		return nil, err
 	}

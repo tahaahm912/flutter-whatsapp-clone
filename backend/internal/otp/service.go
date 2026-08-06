@@ -26,9 +26,10 @@ const (
 
 // Sentinel errors the auth handler maps to specific HTTP status codes.
 var (
-	ErrTooManyAttempts  = errors.New("too many incorrect attempts — request a new code")
-	ErrInvalidOrExpired = errors.New("invalid or expired code")
-	ErrTooSoon          = errors.New("please wait before requesting another code")
+	ErrTooManyAttempts = errors.New("too many incorrect attempts — request a new code")
+	ErrInvalidCode     = errors.New("incorrect code")
+	ErrExpired         = errors.New("code has expired or was never requested")
+	ErrTooSoon         = errors.New("please wait before requesting another code")
 )
 
 // Service generates and verifies OTP codes.
@@ -92,6 +93,15 @@ func (s *Service) Generate(ctx context.Context, identifier string) (string, erro
 // given identifier. It enforces a max-attempts limit (slows down
 // brute force against the 6-digit space) and deletes the stored code
 // immediately on success, so each code can only be used once.
+//
+// Refined (Week 3 Day 3) to distinguish two previously-merged cases:
+// the Redis key being gone entirely (the 5-minute TTL genuinely
+// passed, or no code was ever requested for this identifier) now
+// returns ErrExpired, while the key existing but the hash not
+// matching what was submitted returns ErrInvalidCode. Splitting these
+// doesn't weaken brute-force protection — the max-attempts limit above
+// applies identically either way — it just gives the client (and the
+// person typing the code) a more accurate message.
 func (s *Service) Verify(ctx context.Context, identifier, submittedCode string) error {
 	attempts, err := s.redis.Incr(ctx, attemptsKey(identifier)).Result()
 	if err != nil {
@@ -109,13 +119,13 @@ func (s *Service) Verify(ctx context.Context, identifier, submittedCode string) 
 	storedHash, err := s.redis.Get(ctx, codeKey(identifier)).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return ErrInvalidOrExpired
+			return ErrExpired
 		}
 		return fmt.Errorf("failed to fetch stored otp: %w", err)
 	}
 
 	if hashCode(submittedCode) != storedHash {
-		return ErrInvalidOrExpired
+		return ErrInvalidCode
 	}
 
 	s.redis.Del(ctx, codeKey(identifier), attemptsKey(identifier))

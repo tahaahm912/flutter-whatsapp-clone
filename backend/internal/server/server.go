@@ -1,12 +1,15 @@
 // Package server wires up the Gin engine and route registration.
-// Keeping this separate from main.go means later days (auth
-// middleware, WebSocket upgrade, new feature routes) all plug in here
-// without touching the entrypoint.
+// Keeping this separate from main.go means later days (WebSocket
+// upgrade, new feature routes) all plug in here without touching the
+// entrypoint.
 package server
 
 import (
+	"net/http"
+
 	"whatsapp-clone-backend/internal/auth"
 	"whatsapp-clone-backend/internal/health"
+	"whatsapp-clone-backend/internal/middleware"
 	"whatsapp-clone-backend/internal/otp"
 
 	"github.com/gin-gonic/gin"
@@ -18,10 +21,12 @@ import (
 // and the feature handlers built on top of them) so there's a single
 // place new dependencies get threaded through as the project grows.
 type Server struct {
-	engine      *gin.Engine
-	db          *gorm.DB
-	redis       *redis.Client
-	authHandler *auth.Handler
+	engine        *gin.Engine
+	db            *gorm.DB
+	redis         *redis.Client
+	authHandler   *auth.Handler
+	jwtSecret     string
+	deviceChecker middleware.DeviceChecker
 }
 
 // New builds a Server with all routes registered.
@@ -31,12 +36,15 @@ func New(database *gorm.DB, redisClient *redis.Client, jwtSecret string) *Server
 	otpService := otp.NewService(redisClient)
 	authService := auth.NewService(database, otpService, jwtSecret)
 	authHandler := auth.NewHandler(authService)
+	deviceChecker := middleware.NewGormDeviceChecker(database)
 
 	s := &Server{
-		engine:      engine,
-		db:          database,
-		redis:       redisClient,
-		authHandler: authHandler,
+		engine:        engine,
+		db:            database,
+		redis:         redisClient,
+		authHandler:   authHandler,
+		jwtSecret:     jwtSecret,
+		deviceChecker: deviceChecker,
 	}
 	s.registerRoutes()
 	return s
@@ -48,10 +56,26 @@ func (s *Server) Run(addr string) error {
 }
 
 // registerRoutes is the single place new endpoints get added as the
-// project grows (remaining auth routes this week, user/key routes in
-// Week 4, conversation/message routes in Week 5, etc.).
+// project grows (user/key routes in Week 4, conversation/message
+// routes in Week 5, etc.). Real protected routes start arriving in
+// Week 4 (GET /users/me); today's /health/protected exists purely to
+// give Member 1's new ApiClient something real to test the
+// Authorization header against, per the Week 3 Day 1 checkpoint.
 func (s *Server) registerRoutes() {
 	s.engine.GET("/health", health.Handler(s.db, s.redis))
+
+	// Protected test route. Every future protected route reuses the
+	// same middleware.RequireAuth(s.jwtSecret, s.deviceChecker) call
+	// shown here.
+	s.engine.GET("/health/protected", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+			"authenticated_as": gin.H{
+				"user_id":   c.GetString(middleware.ContextUserIDKey),
+				"device_id": c.GetString(middleware.ContextDeviceIDKey),
+			},
+		})
+	})
 
 	authGroup := s.engine.Group("/auth")
 	authGroup.POST("/register", s.authHandler.Register)
