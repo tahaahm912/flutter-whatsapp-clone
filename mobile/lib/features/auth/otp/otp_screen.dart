@@ -1,22 +1,25 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/core/widgets/app_button.dart';
 import 'package:pinput/pinput.dart';
+import '../data/services/auth_api_service.dart';
+import '../data/models/verify_otp_request.dart';
 
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key});
+  final String email;
+  const OtpScreen({super.key, required this.email,});
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
+  
 }
 
 class _OtpScreenState extends State<OtpScreen> {
   final _otpController = TextEditingController();
+  final AuthApiService _authApiService = AuthApiService();
 
-  // Temporary email
-  // Later this will come from Register Screen
-  final String email = "abc123@gmail.com";
 
   @override
   void dispose() {
@@ -93,7 +96,7 @@ class _OtpScreenState extends State<OtpScreen> {
               const SizedBox(height: 4),
 
               Text(
-                email,
+                widget.email,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 14,
@@ -127,7 +130,7 @@ class _OtpScreenState extends State<OtpScreen> {
               // Verify Button
               AppButton(
                 text: "Verify OTP",
-                onPressed: () {
+                onPressed: () async {
                   if (_otpController.text.length != 6) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -139,8 +142,30 @@ class _OtpScreenState extends State<OtpScreen> {
                     return;
                   }
 
-                  // Week 3: Call Verify OTP API
-                  context.go('/home');
+                  try{
+                    await _authApiService.verifyOtp(
+                      VerifyOtpRequest(
+                        identifier: widget.email,
+                         code: _otpController.text,
+                         ),
+                    );
+                    if (!mounted) return;
+
+                    context.go('/home');
+                  } on DioException catch(e) {
+                    if (!mounted) return;
+
+                    String message = "OTP verification failed";
+
+                    if(e.response?. data != null &&
+                       e.response!.data is Map &&
+                       e.response!.data["message"] != null){
+                        message = e.response!.data["message"];
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(message)),
+                    );
+                  }
                 },
               ),
 

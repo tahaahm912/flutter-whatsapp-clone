@@ -2,6 +2,8 @@ import 'package:mobile/features/auth/data/services/auth_api_service.dart';
 
 import 'package:mobile/features/auth/data/models/register_request.dart';
 import 'package:mobile/features/auth/data/models/register_response.dart';
+import '../models/login_request.dart';
+import '../models/login_response.dart';
 
 class AuthRepository {
   final AuthApiService _apiService;
@@ -10,5 +12,9 @@ class AuthRepository {
 
   Future<RegisterResponse> register(RegisterRequest request) async {
     return await _apiService.register(request);
+  }
+
+  Future<LoginResponse> login(LoginRequest request) async {
+    return await _apiService.login(request);
   }
 } 

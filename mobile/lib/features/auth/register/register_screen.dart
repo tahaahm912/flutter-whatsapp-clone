@@ -69,7 +69,7 @@ Future<void> _register() async {
         SnackBar(content: Text(response.message)),
       );
 
-      context.go('/otp');
+      context.go('/otp', extra: _emailController.text.trim(),);
     } catch (e) {
       if (!mounted) return;
 

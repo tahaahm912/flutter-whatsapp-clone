@@ -4,6 +4,12 @@ import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/core/widgets/app_button.dart';
 import 'package:mobile/core/widgets/app_text_field.dart';
 
+import 'package:mobile/core/storage/secure_storage.dart';
+import 'package:dio/dio.dart';
+import 'package:mobile/features/auth/data/models/login_request.dart';
+import 'package:mobile/features/auth/data/repositories/auth_repository.dart';
+import 'package:mobile/features/auth/data/services/auth_api_service.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -17,12 +23,84 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   final _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
+  final SecureStorage _storage = SecureStorage();
+  late final AuthRepository _repository;
 
 @override
 void dispose() {
   _emailController.dispose();
   _passwordController.dispose();
   super.dispose();
+}
+
+Future<void> _login() async {
+  if (!_formKey.currentState!.validate()) {
+    return;
+  }
+
+  setState(() {
+    _isLoading = true;
+  });
+
+  try {
+    final request = LoginRequest(
+      identifier: _emailController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
+
+    final response = await _repository.login(request);
+
+    await _storage.saveAccessToken(response.accessToken);
+    await _storage.saveRefreshToken(response.refreshToken);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(response.message),
+      ),
+    );
+
+    context.go('/home');
+  } on DioException catch (e) {
+  debugPrint("STATUS CODE: ${e.response?.statusCode}");
+  debugPrint("RESPONSE: ${e.response?.data}");
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(e.response?.data.toString() ?? e.message ?? "Login failed"),
+      backgroundColor: Colors.red,
+    ),
+  );
+} catch (e) {
+  debugPrint(e.toString());
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(e.toString()),
+      backgroundColor: Colors.red,
+    ),
+  );
+} finally {
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+}
+
+@override
+void initState() {
+  super.initState();
+
+  final apiService = AuthApiService();
+  _repository = AuthRepository(apiService);
 }
 
   @override
@@ -143,10 +221,10 @@ void dispose() {
 
                 // Login Button
                 AppButton(
-                  text: "Login",
+                  text: _isLoading ? "Logging in..." : "Login",
                   onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      context.go('/home');
+                    if (!_isLoading) {
+                      _login();
                     }
                   },
                 ),
