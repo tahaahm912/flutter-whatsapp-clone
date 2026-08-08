@@ -1,28 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mobile/core/storage/secure_storage.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final storage = SecureStorage();
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Home"),
+        title: const Text("BluLink"),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: "Logout",
-            onPressed: () async {
-              await storage.clearTokens();
-
-              if (!context.mounted) return;
-
-              context.go('/login');
+            onPressed: () {
+              context.go('/profile');
             },
+            icon: const Icon(Icons.person_outline),
+            tooltip: "Profile",
           ),
         ],
       ),
@@ -30,7 +23,7 @@ class HomeScreen extends StatelessWidget {
         child: Text(
           "Welcome to BluLink!",
           style: TextStyle(
-            fontSize: 22,
+            fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
