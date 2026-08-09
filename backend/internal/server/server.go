@@ -11,6 +11,7 @@ import (
 	"whatsapp-clone-backend/internal/health"
 	"whatsapp-clone-backend/internal/middleware"
 	"whatsapp-clone-backend/internal/otp"
+	"whatsapp-clone-backend/internal/users"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -25,6 +26,7 @@ type Server struct {
 	db            *gorm.DB
 	redis         *redis.Client
 	authHandler   *auth.Handler
+	usersHandler  *users.Handler
 	jwtSecret     string
 	deviceChecker middleware.DeviceChecker
 }
@@ -37,12 +39,15 @@ func New(database *gorm.DB, redisClient *redis.Client, jwtSecret string) *Server
 	authService := auth.NewService(database, otpService, jwtSecret)
 	authHandler := auth.NewHandler(authService)
 	deviceChecker := middleware.NewGormDeviceChecker(database)
+	usersService := users.NewService(database)
+	usersHandler := users.NewHandler(usersService)
 
 	s := &Server{
 		engine:        engine,
 		db:            database,
 		redis:         redisClient,
 		authHandler:   authHandler,
+		usersHandler:  usersHandler,
 		jwtSecret:     jwtSecret,
 		deviceChecker: deviceChecker,
 	}
@@ -56,17 +61,12 @@ func (s *Server) Run(addr string) error {
 }
 
 // registerRoutes is the single place new endpoints get added as the
-// project grows (user/key routes in Week 4, conversation/message
-// routes in Week 5, etc.). Real protected routes start arriving in
-// Week 4 (GET /users/me); today's /health/protected exists purely to
-// give Member 1's new ApiClient something real to test the
-// Authorization header against, per the Week 3 Day 1 checkpoint.
+// project grows (conversation/message routes in Week 5, etc.).
 func (s *Server) registerRoutes() {
 	s.engine.GET("/health", health.Handler(s.db, s.redis))
 
-	// Protected test route. Every future protected route reuses the
-	// same middleware.RequireAuth(s.jwtSecret, s.deviceChecker) call
-	// shown here.
+	// Kept from Week 3 Day 1 as a lightweight auth+session smoke test;
+	// GET /users/me below is the first real protected resource.
 	s.engine.GET("/health/protected", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
@@ -84,4 +84,11 @@ func (s *Server) registerRoutes() {
 	authGroup.POST("/login", s.authHandler.Login)
 	authGroup.POST("/refresh", s.authHandler.Refresh)
 	authGroup.POST("/logout", s.authHandler.Logout)
+
+	// First real protected resource group (Week 4 Day 1). Every route
+	// added here is automatically behind RequireAuth — no need to
+	// repeat it per-route the way /health/protected does above.
+	usersGroup := s.engine.Group("/users")
+	usersGroup.Use(middleware.RequireAuth(s.jwtSecret, s.deviceChecker))
+	usersGroup.GET("/me", s.usersHandler.Me)
 }

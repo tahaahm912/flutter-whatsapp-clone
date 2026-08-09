@@ -232,6 +232,34 @@
       ]
     },
     {
+      "name": "3d. GET /users/me",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/me"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with expected fields', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.be.a('string').and.not.empty;",
+              "  pm.expect(data.name).to.be.a('string');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "4. Refresh",
       "request": {
         "method": "POST",

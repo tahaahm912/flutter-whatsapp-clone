@@ -93,3 +93,50 @@ Before Week 3 wiring begins, Member 1 should know:
 2. `POST /auth/resend-otp` now exists and is documented.
 3. Forgot-password and Google sign-in have no backend support yet —
    don't wire buttons to endpoints that don't exist.
+
+---
+
+## Week 4, Day 1 update — reviewed against the real Week 3 networking code
+
+Member 1's networking layer now exists (`core/network/`,
+`features/auth/data/`) — reviewed against the actual code, not just
+the plan. Two things worth fixing on the Flutter side (not backend
+issues, flagging for whoever owns that code next):
+
+1. **`AuthInterceptor.onRequest` hardcodes an empty token:**
+   ```dart
+   options.headers["Authorization"] = "Bearer ";
+   ```
+   This never reads the real token from `SecureStorage`. As of today,
+   `GET /users/me` and any future protected route requires a real
+   token — with this as-is, every protected request will fail with
+   `401 AUTH_HEADER_MALFORMED` (an empty string after `Bearer ` fails
+   the middleware's format check). Needs to become something like
+   `options.headers["Authorization"] = "Bearer \${await SecureStorage().getAccessToken()}"`.
+
+2. **`LoginResponse.fromJson` expects a `message` field that the
+   backend never sends**, and doesn't parse the `user` object at all:
+   ```dart
+   message: json["message"] ?? "",
+   ```
+   Harmless today (defaults to `""`, no crash), but worth knowing:
+   the backend's actual login response shape is `access_token`,
+   `refresh_token`, `token_type`, `expires_at`, and a `user` object
+   (`id`, `name`, `phone_number`, `email`) — no `message` field exists.
+   Since `GET /users/me` (below) now exists as its own call, this
+   likely doesn't matter — the intent seems to be "fetch profile
+   separately" rather than "get it from login" — just confirming
+   that's the intended design, not an oversight.
+
+## New: GET /users/me
+
+Added today specifically because `profile_screen.dart` already has
+this exact comment:
+```dart
+// Temporary profile data.
+// We will replace these with GET /users/me data.
+```
+Response fields map directly to that screen's fields: `name` → `_name`,
+`about` → `_about`, `phone_number` → `_phone`, `email` → `_email`.
+Requires `Authorization: Bearer <access_token>` — see points 1 above
+before wiring this up, or every call will 401.

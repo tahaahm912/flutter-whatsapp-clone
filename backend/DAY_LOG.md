@@ -1232,3 +1232,72 @@ return `201` with a real UUID in `id`, and:
 psql whatsapp_clone -c "SELECT id, phone_number, account_status FROM users ORDER BY created_at DESC LIMIT 1;"
 ```
 should show a properly generated UUID, not an error.
+
+---
+
+## Week 4, Day 1 — GET /users/me
+
+**Goal (from schedule):** Build GET /users/me to return the logged-in
+user's real data. Checkpoint (shared): Profile screen shows the
+logged-in user's real data.
+
+**Reviewed the actual current Flutter code first** (not just the plan)
+since real networking code now exists. Findings, and what they mean
+for today's work, are in `docs/API_CONTRACT_REVIEW.md` under "Week 4,
+Day 1 update" — short version: `profile_screen.dart` already has a
+comment saying exactly what to build (`// We will replace these with
+GET /users/me data`), confirming the field names needed (`name`,
+`about`, `phone_number`, `email`). Also found two Flutter-side issues
+worth fixing before this can actually work end-to-end (not backend
+problems, just flagging): the auth interceptor sends an always-empty
+bearer token, and `LoginResponse` expects a `message` field the
+backend never sends.
+
+**What's included in today's package:**
+- `internal/users/` — new package, following the same
+  service/handler split as `internal/auth`:
+  - `service.go` — `GetByID` looks up a user by UUID (parses the
+    string ID from the JWT claim; a parse failure is treated as "not
+    found" rather than a crash, since a malformed ID can never
+    correspond to a real row).
+  - `handler.go` — `Me` reads the user ID from
+    `middleware.ContextUserIDKey` (never from a query param or
+    request body — only from the verified JWT) and returns the
+    profile.
+  - `dto.go` — `MeResponse`, field-matched exactly to what
+    `profile_screen.dart` expects. One deliberate naming choice: JSON
+    key is `about`, not `about_text` (the DB column name) — shorter,
+    and matches the Flutter screen's own `_about` variable.
+- `internal/server/server.go` — new `/users` route group, with
+  `RequireAuth` applied once at the group level (`usersGroup.Use(...)`)
+  rather than repeated per-route — the first time this project uses
+  that pattern; every future route added to this group is
+  automatically protected.
+- `postman/WhatsApp_Clone_Auth.postman_collection.json` — added
+  request "3d. GET /users/me", positioned (per the Day 4 lesson) right
+  after Login while the session is still active, before
+  Refresh/Logout touch it.
+- `docs/openapi.yaml` — documented `/users/me`, bumped to 0.4.0.
+
+**No new dependencies, no new migrations** — `users` package only
+needed `gorm.io/gorm` and `github.com/google/uuid`, both already in
+`go.mod` from earlier days.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection through Login, then run "3d. GET
+/users/me" → expect `200` with your real `id`, `name`,
+`phone_number`/`email`, `about` (likely `null` — nothing sets it yet,
+that's expected until a profile-edit endpoint exists), `created_at`.
+
+**Checkpoint status:** ⬜ Pending your local verification — and
+depends on the two Flutter-side items in the contract review being
+fixed first, or every request will 401.
+
+**Next up (Week 4, Day 2):** Build `GET /users/search?phone=` or
+`?email=` — Member 1 builds the User Search screen UI this same day.
+Checkpoint: searching for a phone number/email returns a matching user
+in Postman.
