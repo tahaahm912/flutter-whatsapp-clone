@@ -43,6 +43,7 @@ dependencies:
 
   # Navigation
   go_router: ^17.3.0
+  libsignal: ^7.0.2
 
 dev_dependencies:
   flutter_test:

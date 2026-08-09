@@ -5,6 +5,8 @@ class SecureStorage {
 
   static const String _accessTokenKey = "access_token";
   static const String _refreshTokenKey = "refresh_token";
+  static const String _identityPrivateKey = "identity_private_key";
+
 
   Future<void> saveAccessToken(String token) async {
     await _storage.write(
@@ -32,6 +34,25 @@ class SecureStorage {
     );
   }
 
+  Future<void> saveIdentityPrivateKey(String key) async {
+    await _storage.write(
+      key: _identityPrivateKey,
+      value: key,
+    );
+  }
+
+  Future<String?> getIdentityPrivateKey() async {
+    return await _storage.read(
+      key: _identityPrivateKey,
+    );
+  }
+
+  Future<void> deleteIdentityPrivateKey() async {
+    await _storage.delete(
+      key: _identityPrivateKey,
+    );
+  }
+
   Future<void> clearTokens() async {
     await _storage.delete(
       key: _accessTokenKey,
@@ -40,5 +61,9 @@ class SecureStorage {
     await _storage.delete(
       key: _refreshTokenKey,
     );
+  }
+
+  Future<void> clearAll() async {
+    await _storage.deleteAll();
   }
 }

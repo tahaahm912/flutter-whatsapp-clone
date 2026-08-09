@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/app/theme/app_colors.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -19,6 +20,7 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
+
       body: const Center(
         child: Text(
           "Welcome to BluLink!",
@@ -28,6 +30,21 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
       ),
+
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        onPressed: () {
+          context.push('/new-contact');
+        },
+        child: const Icon(
+          Icons.add,
+          size: 30,
+        ),
+      ),
+
+      floatingActionButtonLocation:
+          FloatingActionButtonLocation.endFloat,
     );
   }
 }
