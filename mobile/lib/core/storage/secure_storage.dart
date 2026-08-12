@@ -6,6 +6,7 @@ class SecureStorage {
   static const String _accessTokenKey = "access_token";
   static const String _refreshTokenKey = "refresh_token";
   static const String _identityPrivateKey = "identity_private_key";
+  static const String _registrationIdKey = "registration_id";
 
 
   Future<void> saveAccessToken(String token) async {
@@ -51,6 +52,29 @@ class SecureStorage {
     await _storage.delete(
       key: _identityPrivateKey,
     );
+  }
+
+  // Week 4, Day 5: the backend's POST /users/keys requires a
+  // registration_id (Signal's 14-bit device identifier, 1–16380) —
+  // it's generated once per device and reused on every key upload
+  // after that, so it's persisted here alongside the identity key.
+  Future<void> saveRegistrationId(int registrationId) async {
+    await _storage.write(
+      key: _registrationIdKey,
+      value: registrationId.toString(),
+    );
+  }
+
+  Future<int?> getRegistrationId() async {
+    final value = await _storage.read(
+      key: _registrationIdKey,
+    );
+
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+
+    return int.tryParse(value);
   }
 
   Future<void> clearTokens() async {

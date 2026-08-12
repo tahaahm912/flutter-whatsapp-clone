@@ -69,7 +69,17 @@ Future<void> _register() async {
         SnackBar(content: Text(response.message)),
       );
 
-      context.go('/otp', extra: _emailController.text.trim(),);
+      context.go(
+        '/otp',
+        extra: {
+          'email': _emailController.text.trim(),
+          // Passed along so the OTP screen can log the account in
+          // immediately after verification and silently upload its
+          // Signal Protocol public keys (Week 4, Day 5) — no manual
+          // "log in again" step for the user.
+          'password': _passwordController.text.trim(),
+        },
+      );
     } catch (e) {
       if (!mounted) return;
 

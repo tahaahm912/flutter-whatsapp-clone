@@ -6,10 +6,25 @@ import 'package:mobile/core/widgets/app_button.dart';
 import 'package:pinput/pinput.dart';
 import '../data/services/auth_api_service.dart';
 import '../data/models/verify_otp_request.dart';
+import '../data/models/login_request.dart';
+import '../data/repositories/auth_repository.dart';
+
+import 'package:mobile/core/storage/secure_storage.dart';
+import 'package:mobile/core/network/api_client.dart';
+import 'package:mobile/core/crypto/identity_key_service.dart';
+import 'package:mobile/core/crypto/pre_key_service.dart';
+import 'package:mobile/features/keys/data/repositories/key_repository.dart';
+import 'package:mobile/features/keys/data/services/key_api_service.dart';
 
 class OtpScreen extends StatefulWidget {
   final String email;
-  const OtpScreen({super.key, required this.email,});
+  final String password;
+
+  const OtpScreen({
+    super.key,
+    required this.email,
+    required this.password,
+  });
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -19,12 +34,53 @@ class OtpScreen extends StatefulWidget {
 class _OtpScreenState extends State<OtpScreen> {
   final _otpController = TextEditingController();
   final AuthApiService _authApiService = AuthApiService();
+  late final AuthRepository _authRepository;
+  final SecureStorage _storage = SecureStorage();
 
+  bool _isVerifying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _authRepository = AuthRepository(_authApiService);
+  }
 
   @override
   void dispose() {
     _otpController.dispose();
     super.dispose();
+  }
+
+  /// Generates this device's Signal Protocol public keys (or reuses
+  /// the ones already on-device) and uploads them to the backend.
+  ///
+  /// Week 4, Day 5 goal: new accounts automatically upload their
+  /// public keys with no manual step. Private keys never leave the
+  /// device — only public material is sent to `POST /users/keys`.
+  ///
+  /// Failures here are logged, not surfaced as a blocking error: a
+  /// flaky network right after signup shouldn't strand the user
+  /// outside the app. Key upload can be retried later (e.g. next
+  /// time keys are needed for a session).
+  Future<void> _uploadPublicKeysSilently() async {
+    try {
+      final apiClient = ApiClient();
+      final identityKeyService = IdentityKeyService(_storage);
+      final preKeyService = PreKeyService(identityKeyService);
+      final keyApiService = KeyApiService(apiClient);
+
+      final keyRepository = KeyRepository(
+        identityKeyService: identityKeyService,
+        preKeyService: preKeyService,
+        keyApiService: keyApiService,
+      );
+
+      await keyRepository.uploadPublicKeys();
+
+      debugPrint('Public keys uploaded automatically after registration.');
+    } catch (e) {
+      debugPrint('Automatic public key upload failed (will retry later): $e');
+    }
   }
 
   @override
@@ -130,6 +186,7 @@ class _OtpScreenState extends State<OtpScreen> {
               // Verify Button
               AppButton(
                 text: "Verify OTP",
+                isLoading: _isVerifying,
                 onPressed: () async {
                   if (_otpController.text.length != 6) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -142,6 +199,12 @@ class _OtpScreenState extends State<OtpScreen> {
                     return;
                   }
 
+                  if (_isVerifying) return;
+
+                  setState(() {
+                    _isVerifying = true;
+                  });
+
                   try{
                     await _authApiService.verifyOtp(
                       VerifyOtpRequest(
@@ -149,6 +212,24 @@ class _OtpScreenState extends State<OtpScreen> {
                          code: _otpController.text,
                          ),
                     );
+
+                    // Registration is now fully verified. Log the
+                    // account in right away so the device has a JWT,
+                    // then silently generate/upload this device's
+                    // Signal Protocol public keys (Week 4, Day 5) —
+                    // no manual step required from the user.
+                    final loginResponse = await _authRepository.login(
+                      LoginRequest(
+                        identifier: widget.email,
+                        password: widget.password,
+                      ),
+                    );
+
+                    await _storage.saveAccessToken(loginResponse.accessToken);
+                    await _storage.saveRefreshToken(loginResponse.refreshToken);
+
+                    await _uploadPublicKeysSilently();
+
                     if (!mounted) return;
 
                     context.go('/home');
@@ -165,6 +246,12 @@ class _OtpScreenState extends State<OtpScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text(message)),
                     );
+                  } finally {
+                    if (mounted) {
+                      setState(() {
+                        _isVerifying = false;
+                      });
+                    }
                   }
                 },
               ),

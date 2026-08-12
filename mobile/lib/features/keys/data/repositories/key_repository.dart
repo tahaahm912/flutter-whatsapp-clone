@@ -24,6 +24,9 @@ class KeyRepository {
     final identityPublicKey =
         _identityKeyService.getPublicKey(identityKey);
 
+    final registrationId =
+        await _identityKeyService.getOrCreateRegistrationId();
+
     final signedPreKey =
         await _preKeyService.generateSignedPreKey(id: 1);
 
@@ -44,6 +47,7 @@ class KeyRepository {
 
     await _keyApiService.uploadPublicKeys(
       identityKey: identityPublicKey,
+      registrationId: registrationId,
       signedPreKey: signedPreKeyJson,
       oneTimePreKeys: oneTimePreKeysJson,
     );

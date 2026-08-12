@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:libsignal/libsignal.dart';
 
@@ -70,5 +71,29 @@ class IdentityKeyService {
       privateKey: privateKey,
       publicKey: publicKey,
     );
+  }
+
+  /// Get the existing registration ID or generate a new one.
+  ///
+  /// Week 4, Day 5: the backend requires this on every POST
+  /// /users/keys call (Signal's 14-bit device identifier, valid
+  /// range 1–16380). It's generated once per device — not per
+  /// upload — and reused after that.
+  Future<int> getOrCreateRegistrationId() async {
+    final existing = await _storage.getRegistrationId();
+
+    if (existing != null) {
+      return existing;
+    }
+
+    // Signal's registration ID is a 14-bit value; the backend
+    // validates 1–16380 inclusive, so generate within that range
+    // (never 0 — the backend's `binding:"required"` on this field
+    // would reject it).
+    final newRegistrationId = 1 + Random.secure().nextInt(16380);
+
+    await _storage.saveRegistrationId(newRegistrationId);
+
+    return newRegistrationId;
   }
 }

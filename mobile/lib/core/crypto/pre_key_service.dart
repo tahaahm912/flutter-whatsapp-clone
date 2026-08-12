@@ -63,12 +63,26 @@ class PreKeyService {
   }
 
   /// Convert a Signed Pre-Key's public information to JSON.
+  ///
+  /// Field names match the backend's `SignedPrekeyInput` DTO exactly
+  /// (`key_id` / `public_key` / `signature`) — fixed Week 4, Day 5.
+  /// This used to emit `id`/`publicKey`/`signature`, which the
+  /// backend's Gin binding silently ignored (unknown JSON fields
+  /// aren't an error by default), so the real `key_id`/`public_key`
+  /// fields were always missing and failed `binding:"required"`.
   Map<String, dynamic> signedPreKeyToJson(
     SignedPreKeyRecord key,
   ) {
     return {
-      'id': key.id,
-      'publicKey': base64Encode(
+      // Bug fix (Week 4, Day 5): `id` is a method on this class, same
+      // as `publicKey()` and `signature()` right below — `key.id`
+      // (no parens) was tearing off the method itself instead of
+      // calling it, which crashed jsonEncode inside Dio with
+      // "Converting object to an encodable object failed: Closure:
+      // () => int from Function 'id'" the first time this was
+      // actually exercised (Week 4, Day 5's auto-upload).
+      'key_id': key.id(),
+      'public_key': base64Encode(
         key.publicKey().toList(),
       ),
       'signature': base64Encode(
@@ -78,12 +92,14 @@ class PreKeyService {
   }
 
   /// Convert a One-Time Pre-Key's public information to JSON.
+  /// See `signedPreKeyToJson` above for why these are `key_id` /
+  /// `public_key`, not `id` / `publicKey`.
   Map<String, dynamic> preKeyToJson(
     PreKeyRecord key,
   ) {
     return {
-      'id': key.id,
-      'publicKey': base64Encode(
+      'key_id': key.id(),
+      'public_key': base64Encode(
         key.publicKey().toList(),
       ),
     };

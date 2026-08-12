@@ -73,8 +73,15 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/otp',
       builder: (context, state) {
+        // Week 4, Day 5: the register screen now passes both the
+        // email and password (as a Map) so the OTP screen can log
+        // the account in right after verification, instead of just
+        // the email string it used to receive.
+        final args = state.extra as Map<String, dynamic>;
+
         return OtpScreen(
-          email: state.extra as String,
+          email: args['email'] as String,
+          password: args['password'] as String,
         );
       },
     ),

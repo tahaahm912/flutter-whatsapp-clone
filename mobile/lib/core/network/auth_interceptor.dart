@@ -1,11 +1,18 @@
 import 'package:dio/dio.dart';
 
+import '../storage/secure_storage.dart';
+
 class AuthInterceptor extends Interceptor {
+  final SecureStorage _storage;
+
+  AuthInterceptor({SecureStorage? storage})
+      : _storage = storage ?? SecureStorage();
+
   @override
   void onRequest(
     RequestOptions options,
     RequestInterceptorHandler handler,
-  ) {
+  ) async {
     print('========== AUTH INTERCEPTOR ==========');
     print('REQUEST => ${options.method} ${options.uri}');
 
@@ -23,9 +30,19 @@ class AuthInterceptor extends Interceptor {
     );
 
     if (!isPublicEndpoint) {
-      // JWT authentication will be added here later
-      // when we implement secure token storage.
-      print('Authenticated endpoint detected');
+      // Bug fix (Week 4, Day 5): this used to be a no-op comment and
+      // never actually attached a token, which meant every protected
+      // endpoint (including the new POST /users/keys auto-upload)
+      // failed with 401 AUTH_HEADER_MALFORMED. Now reads the real
+      // access token saved by SecureStorage after login.
+      final token = await _storage.getAccessToken();
+
+      if (token != null && token.isNotEmpty) {
+        options.headers['Authorization'] = 'Bearer $token';
+        print('Authenticated endpoint detected - token attached');
+      } else {
+        print('Authenticated endpoint detected - no token in storage');
+      }
     } else {
       print('Public endpoint - no Authorization header added');
     }
