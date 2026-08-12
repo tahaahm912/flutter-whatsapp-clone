@@ -28,6 +28,18 @@
     {
       "key": "refresh_token",
       "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "other_user_id",
+      "value": ""
+    },
+    {
+      "key": "conversation_id",
+      "value": ""
     }
   ],
   "item": [
@@ -253,6 +265,400 @@
               "  const data = pm.response.json();",
               "  pm.expect(data.id).to.be.a('string').and.not.empty;",
               "  pm.expect(data.name).to.be.a('string');",
+              "  pm.collectionVariables.set('user_id', data.id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3e. GET /users/search?phone= (finds self)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/search?phone={{identifier}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with a matching user, no phone/email in response', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.be.a('string').and.not.empty;",
+              "  pm.expect(data).to.not.have.property('phone_number');",
+              "  pm.expect(data).to.not.have.property('email');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3f. GET /users/search with no params (expect 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/search"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with SEARCH_PARAM_REQUIRED', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('SEARCH_PARAM_REQUIRED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3g. GET /users/search for a number that doesn't exist (expect 404)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/search?phone=+19995550000"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 404 with USER_NOT_FOUND', function () {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().code).to.eql('USER_NOT_FOUND');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3h. POST /users/keys (identity key only)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/keys",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identity_public_key\": \"SLfveMJKdTEtErDlUeEh8oQ/NpSo3xZY0RvH1Z915mc=\",\n  \"registration_id\": 12345\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200, identity key stored', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.identity_key_stored).to.eql(true);",
+              "  pm.expect(data.signed_prekey_stored).to.eql(false);",
+              "  pm.expect(data.one_time_prekeys_stored).to.eql(0);",
+              "});",
+              "console.log('Real key material comes from libsignal on the Flutter side (Week 4 Day 3-4) \u2014 this placeholder just exercises the endpoint.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3h2. POST /users/keys with malformed key (expect INVALID_KEY_FORMAT)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/keys",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identity_public_key\": \"this-is-not-valid-base64-key-material\",\n  \"registration_id\": 12345\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with code INVALID_KEY_FORMAT', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('INVALID_KEY_FORMAT');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3i. GET /users/{userId}/keys (fetch own bundle)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/users/{{user_id}}/keys"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with at least one device bundle', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.devices).to.be.an('array').that.is.not.empty;",
+              "  pm.expect(data.devices[0].identity_key.public_key).to.be.a('string').and.not.empty;",
+              "});",
+              "console.log('user_id is auto-captured by request 3d - just run these in order.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3j. POST /conversations with self (expect 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participant_id\": \"{{user_id}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with CANNOT_MESSAGE_SELF', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('CANNOT_MESSAGE_SELF');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3j2. POST /conversations with malformed participant_id (expect 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participant_id\": \"not-a-uuid-at-all\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with INVALID_PARTICIPANT', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('INVALID_PARTICIPANT');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3k. POST /conversations with a nonexistent user (expect 404)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participant_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 404 with PARTICIPANT_NOT_FOUND', function () {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().code).to.eql('PARTICIPANT_NOT_FOUND');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3l. POST /conversations (create) - NOTE: needs a second real user's ID",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participant_id\": \"{{other_user_id}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201 (newly created) with a conversation id', function () {",
+              "  pm.response.to.have.status(201);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.be.a('string').and.not.empty;",
+              "  pm.expect(data.type).to.eql('direct');",
+              "  pm.collectionVariables.set('conversation_id', data.id);",
+              "});",
+              "console.log('Set the other_user_id collection variable to a second real, verified user before running this \u2014 e.g. register a second account first, or run this against a teammate\\'s test user.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3m. POST /conversations again with same participant (expect 200, same ID)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participant_id\": \"{{other_user_id}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 (found existing) with the SAME conversation id as before', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.eql(pm.collectionVariables.get('conversation_id'));",
+              "});",
+              "console.log('This is the real test: calling create again must NOT spawn a duplicate conversation.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3n. GET /conversations (list mine)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/conversations"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with a conversations array', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.conversations).to.be.an('array');",
+              "});",
+              "pm.test('If conversations exist, the one just created is in the list', function () {",
+              "  const data = pm.response.json();",
+              "  const convId = pm.collectionVariables.get('conversation_id');",
+              "  if (convId) {",
+              "    const found = data.conversations.some(c => c.id === convId);",
+              "    pm.expect(found).to.be.true;",
+              "  }",
               "});"
             ]
           }

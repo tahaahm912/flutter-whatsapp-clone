@@ -22,6 +22,11 @@ import (
 // panicking on a malformed ID is the correct default either way.
 var ErrUserNotFound = errors.New("user not found")
 
+// ErrSearchParamRequired covers both "neither phone nor email was
+// given" and "both were given" — search is one-identifier-at-a-time
+// by design, matching how the search box will actually be used.
+var ErrSearchParamRequired = errors.New("provide exactly one of phone or email")
+
 // Service handles user profile lookups.
 type Service struct {
 	db *gorm.DB
@@ -47,6 +52,37 @@ func (s *Service) GetByID(ctx context.Context, userID string) (*models.User, err
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to look up user: %w", err)
+	}
+	return &user, nil
+}
+
+// Search finds one user by an exact phone number or email match — not
+// both, not a substring/partial match. Only accounts with
+// account_status = 'active' are discoverable: a pending-verification
+// or disabled account being found by a stranger's search would leak
+// information about accounts that aren't really "on" the platform yet
+// (or shouldn't be), similar in spirit to why login never reveals
+// whether an identifier exists.
+func (s *Service) Search(ctx context.Context, phone, email string) (*models.User, error) {
+	hasPhone := phone != ""
+	hasEmail := email != ""
+	if hasPhone == hasEmail { // both empty, or both provided
+		return nil, ErrSearchParamRequired
+	}
+
+	query := s.db.WithContext(ctx).Where("account_status = ?", "active")
+	if hasPhone {
+		query = query.Where("phone_number = ?", phone)
+	} else {
+		query = query.Where("email = ?", email)
+	}
+
+	var user models.User
+	if err := query.First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to search for user: %w", err)
 	}
 	return &user, nil
 }
