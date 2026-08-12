@@ -2,9 +2,11 @@ openapi: 3.0.3
 info:
   title: WhatsApp Clone - Backend API
   description: |
-    Week 1-4 API surface: health check (public + JWT-protected variant),
-    the 6 authentication endpoints, and the first protected user
-    resource (GET /users/me). Paste this file into
+    Week 1-5 API surface: health check (public + JWT-protected variant),
+    the 6 authentication endpoints, the user resource endpoints
+    (GET /users/me, GET /users/search, POST /users/keys,
+    GET /users/{userId}/keys), and conversation creation
+    (POST /conversations). Paste this file into
     https://editor.swagger.io to browse it interactively, or import it
     directly into Postman (File > Import) as an alternative to the
     hand-built collection in /postman.
@@ -31,6 +33,12 @@ info:
     | `OTP_TOO_MANY_ATTEMPTS` | 429 | verify-otp |
     | `ALREADY_VERIFIED` | 400 | resend-otp |
     | `OTP_RESEND_TOO_SOON` | 429 | resend-otp — 60s cooldown |
+    | `SEARCH_PARAM_REQUIRED` | 400 | users/search — neither or both of phone/email given |
+    | `NO_KEYS_AVAILABLE` | 404 | users/{userId}/keys — user exists but no device has uploaded keys yet |
+    | `INVALID_KEY_FORMAT` | 400 | users/keys — key material isn't valid base64, or decodes to the wrong byte length |
+    | `INVALID_PARTICIPANT` | 400 | conversations — participant_id isn't a valid UUID |
+    | `CANNOT_MESSAGE_SELF` | 400 | conversations — participant_id equals the caller's own ID |
+    | `PARTICIPANT_NOT_FOUND` | 404 | conversations — no active user matches participant_id |
     | `INVALID_CREDENTIALS` | 401 | login — also used for "no such account" (never distinguished, by design) |
     | `ACCOUNT_NOT_VERIFIED` | 403 | login |
     | `ACCOUNT_DISABLED` | 403 | login |
@@ -43,7 +51,7 @@ info:
     | `TOKEN_EXPIRED` | 401 | any route behind RequireAuth |
     | `SESSION_REVOKED` | 401 | any route behind RequireAuth — token is valid/unexpired but its device was logged out |
     | `INTERNAL_ERROR` | 500 | any endpoint, unexpected failure |
-  version: "0.4.0"
+  version: "0.10.0"
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -118,6 +126,247 @@ paths:
           description: Same as /health/protected (missing/invalid/expired token, or SESSION_REVOKED)
         "404":
           description: Token was valid but the user no longer exists (code=USER_NOT_FOUND)
+
+  /users/search:
+    get:
+      summary: Find one user by exact phone number or email match
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: phone
+          in: query
+          required: false
+          schema: { type: string }
+          description: E.164 format. Provide exactly one of phone/email, not both.
+        - name: email
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: >
+            A matching user. Deliberately excludes phone_number/email
+            from the response — only name, about, and profile_photo_url
+            are returned about a user other than yourself.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  about: { type: string }
+                  profile_photo_url: { type: string }
+        "400":
+          description: Neither or both of phone/email were given (code=SEARCH_PARAM_REQUIRED), or malformed phone/email format
+        "401":
+          description: Same as /health/protected
+        "404":
+          description: No active account matches (code=USER_NOT_FOUND) — also returned for pending_verification/disabled accounts, which are not discoverable by design
+
+  /users/keys:
+    post:
+      summary: Upload Signal Protocol public keys for the calling device
+      tags: [Users, Keys]
+      security:
+        - bearerAuth: []
+      description: >
+        Only identity_public_key + registration_id are required.
+        signed_prekey and one_time_prekeys are optional — this
+        endpoint is designed to be called once with just the identity
+        key (Week 4 Day 3's Flutter task) and again later with the
+        rest (Day 4's task) rather than requiring everything at once.
+        Uploading a new signed_prekey automatically deactivates the
+        device's previous one (rotation) rather than replacing it —
+        old rows are kept for history.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identity_public_key, registration_id]
+              properties:
+                identity_public_key: { type: string }
+                registration_id: { type: integer }
+                signed_prekey:
+                  type: object
+                  properties:
+                    key_id: { type: integer }
+                    public_key: { type: string }
+                    signature: { type: string }
+                one_time_prekeys:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key_id: { type: integer }
+                      public_key: { type: string }
+      responses:
+        "200":
+          description: Reports which pieces were actually stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identity_key_stored: { type: boolean }
+                  signed_prekey_stored: { type: boolean }
+                  one_time_prekeys_stored: { type: integer }
+        "400":
+          description: >
+            Missing/malformed request body (code=VALIDATION_ERROR), or
+            well-formed but invalid key material — not valid base64,
+            or decodes to the wrong byte length for a Curve25519 key/
+            XEdDSA signature (code=INVALID_KEY_FORMAT)
+        "401":
+          description: Same as /health/protected
+
+  /users/{userId}/keys:
+    get:
+      summary: Fetch a user's public key bundle(s) to start an encrypted session
+      tags: [Users, Keys]
+      security:
+        - bearerAuth: []
+      description: >
+        Reachable for ANY user, not just yourself — this is how Alice
+        gets Bob's public keys to start a chat with him. Returns one
+        bundle per active device (a user with multiple devices needs a
+        separate encrypted session per device). IMPORTANT: this is a
+        stateful GET — each call consumes (permanently marks used) one
+        one-time pre-key per device, if one is available. This is
+        intentional and matches how the Signal Protocol itself works;
+        it is not a caching bug if calling this twice returns a
+        different (or null) one_time_prekey the second time.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: One key bundle per active device with keys uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        device_id: { type: string, format: uuid }
+                        identity_key:
+                          type: object
+                          properties:
+                            public_key: { type: string }
+                            registration_id: { type: integer }
+                        signed_prekey:
+                          type: object
+                          properties:
+                            key_id: { type: integer }
+                            public_key: { type: string }
+                            signature: { type: string }
+                        one_time_prekey:
+                          type: object
+                          nullable: true
+                          description: null if this device has run out of one-time pre-keys
+                          properties:
+                            key_id: { type: integer }
+                            public_key: { type: string }
+        "401":
+          description: Same as /health/protected
+        "404":
+          description: >
+            No such active user (code=USER_NOT_FOUND), or the user
+            exists but no device has finished uploading keys yet
+            (code=NO_KEYS_AVAILABLE)
+
+  /conversations:
+    post:
+      summary: Create a direct (1:1) conversation, or return the existing one
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      description: >
+        The caller (from the JWT) is always one of the two
+        participants — never supplied in the request body. If the
+        caller and participant_id already have a direct conversation,
+        that existing conversation is returned (200) instead of
+        creating a duplicate (201). Week 5 is plaintext-first per the
+        build plan; encryption is layered in during Week 6.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participant_id]
+              properties:
+                participant_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: A new conversation was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "200":
+          description: An existing direct conversation with this participant was found and returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "400":
+          description: >
+            Malformed request (code=VALIDATION_ERROR), participant_id
+            isn't a valid UUID (code=INVALID_PARTICIPANT), or
+            participant_id is the caller's own ID (code=CANNOT_MESSAGE_SELF)
+        "401":
+          description: Same as /health/protected
+        "404":
+          description: No active user found for that participant_id (code=PARTICIPANT_NOT_FOUND)
+    get:
+      summary: List the logged-in user's conversations
+      tags: [Conversations]
+      security:
+        - bearerAuth: []
+      description: >
+        Ordered by creation time, newest first — a known placeholder;
+        once messages exist this should sort by most recent message
+        instead, like every real chat app does. other_participant is
+        only populated for type="direct" (the only type creatable so
+        far) and deliberately excludes phone_number/email, same as
+        GET /users/search.
+      responses:
+        "200":
+          description: The conversation list (empty array if the user has none yet)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string, enum: [direct, group] }
+                        created_at: { type: string, format: date-time }
+                        other_participant:
+                          type: object
+                          nullable: true
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string }
+                            about: { type: string }
+                            profile_photo_url: { type: string }
+        "401":
+          description: Same as /health/protected
 
   /auth/register:
     post:
@@ -316,11 +565,17 @@ components:
             name: { type: string }
             phone_number: { type: string }
             email: { type: string }
+    ConversationResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [direct, group], example: direct }
+        created_at: { type: string, format: date-time }
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
       description: >
-        Not enforced on any endpoint yet — the JWT middleware that
-        checks this is built in Week 3 Day 1.
+        Required on every endpoint marked `security: bearerAuth` above
+        — send as `Authorization: Bearer <access_token>`.

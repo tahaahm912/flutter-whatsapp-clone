@@ -1301,3 +1301,506 @@ fixed first, or every request will 401.
 `?email=` — Member 1 builds the User Search screen UI this same day.
 Checkpoint: searching for a phone number/email returns a matching user
 in Postman.
+
+---
+
+## Week 4, Day 2 — GET /users/search
+
+**Goal (from schedule):** Build GET /users/search?phone= or ?email=.
+Checkpoint: searching for a phone number/email returns a matching user
+in Postman.
+
+**What's included in today's package:**
+- `internal/users/service.go` — new `Search` method. Exactly one of
+  `phone`/`email` is required (both empty or both given → `400
+  SEARCH_PARAM_REQUIRED`); exact match only, no partial/substring
+  search. Only accounts with `account_status = 'active'` are
+  discoverable — a pending-verification or disabled account showing up
+  in someone else's search would leak information about accounts that
+  aren't really usable yet, the same reasoning already applied to
+  login never confirming whether an identifier exists.
+- `internal/users/handler.go` — new `Search` handler. Validates query
+  params via `ShouldBindQuery` (phone must be valid E.164, email must
+  be valid format, both `omitempty` since only one is required) before
+  ever touching the database.
+- `internal/users/dto.go` — `SearchUserRequest`/`SearchUserResponse`.
+  **`SearchUserResponse` deliberately excludes `phone_number` and
+  `email`** — unlike `MeResponse` (your own full profile), this is
+  someone else's data found via a stranger's search. Only `id`, `name`,
+  `about`, `profile_photo_url` are returned — the searcher already
+  knows whichever identifier they searched with and has no legitimate
+  need to see the other one.
+- `internal/server/server.go` — registers `GET /users/search` in the
+  existing `/users` group (already behind `RequireAuth` from Day 1 —
+  search requires being logged in, same as real WhatsApp).
+- `postman/...` — 3 new requests: self-search (finds the just-created
+  test user), no-params (expect `400`), no-match (expect `404`).
+- `docs/openapi.yaml` — documented `/users/search`, bumped to 0.5.0.
+- **`README.md` — significant refresh.** It was stale since Week 1 Day
+  5 (never updated across Weeks 2-4). Now has: a clear "For the
+  Frontend" section up top with both known Flutter issues and exact
+  fix suggestions, a full endpoint reference table, and an updated
+  project structure/design-decisions section reflecting everything
+  built since (`auth`, `otp`, `middleware`, `users` packages, the UUID
+  bug fix, standardized error codes).
+
+**No new dependencies, no new migrations.**
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection through Login, then the new "3e"/"3f"/"3g"
+requests. "3e" should return your own profile summary with **no**
+`phone_number`/`email` keys present at all (not just null — actually
+absent, since the DTO uses `omitempty` and never populates them).
+
+**Checkpoint status:** ⬜ Pending your local verification — same
+dependency as Day 1: the auth interceptor needs its empty-token bug
+fixed before any of this is reachable from the actual app (Postman
+testing works regardless, since it sets the header directly).
+
+**Next up (Week 4, Day 3):** Build `POST /users/keys` to store a
+user's Signal Protocol public keys — Member 1 adds the libsignal
+Flutter package and generates an Identity Key Pair locally on the
+device this same day. Checkpoint: the device generates and stores an
+Identity Key Pair locally.
+
+---
+
+## Week 4, Day 3 — POST /users/keys
+
+**Goal (from schedule):** Build POST /users/keys to store a user's
+public keys (Member 1: add the libsignal Flutter package, generate an
+Identity Key Pair locally on the device). Checkpoint: the device
+generates and stores an Identity Key Pair locally.
+
+**Schema note:** three tables were part of the approved final schema
+from the very beginning (Section 2: Signal Protocol Key Management)
+but never migrated, since nothing needed them until today. Added
+verbatim via `migrations/000004_create_signal_keys.up/down.sql` — no
+redesign, same pattern as every previous "schema catch-up" migration.
+
+**Design choice — one flexible endpoint, not two:** Day 3's Flutter
+task only generates an Identity Key Pair; the signed pre-key and
+one-time pre-key batch aren't generated until Day 4. Rather than
+building a separate endpoint for each, `POST /users/keys` takes
+`identity_public_key`/`registration_id` as required and
+`signed_prekey`/`one_time_prekeys` as optional — callable once today
+with just the identity key, and again after Day 4 (or any time after)
+to add the rest, or to rotate the signed pre-key later.
+
+**What's included in today's package:**
+- `internal/models/signal_identity_key.go` — **deliberately has no
+  `BeforeCreate` hook**, unlike every other model. Its primary key
+  (`device_id`) must come from the authenticated device, never be
+  randomly generated — the doc comment spells out exactly why, as a
+  guard against a future person adding the hook by habit and
+  introducing a real bug.
+- `internal/models/signal_signed_prekey.go`,
+  `signal_one_time_prekey.go` — both have their own generated `id`,
+  so both get the standard `BeforeCreate` pattern.
+- `internal/keys/` — new package (`dto.go`, `service.go`,
+  `handler.go`), same service/handler split as `auth`/`users`.
+  - Identity key storage uses an **explicit `clause.OnConflict`
+    upsert**, not GORM's `Save()` — after this week's UUID bug (caused
+    by trusting an assumption about GORM's implicit behavior instead
+    of verifying it), ambiguous insert-vs-update semantics aren't
+    trusted again without being explicit.
+  - Uploading a `signed_prekey` deactivates the device's previous one
+    first (`is_active = false`), then inserts the new one as active —
+    real rotation, old rows kept for history, matching the schema's
+    `is_active` column design.
+  - One-time pre-keys are batch-inserted; confirmed GORM's `BeforeCreate`
+    fires per-row in a batch insert, so each gets its own ID correctly.
+- `internal/server/server.go` — registers `POST /users/keys` in the
+  existing `/users` group (already behind `RequireAuth`). The device
+  the keys belong to always comes from the JWT's `device_id` claim,
+  never from the request body — one device can never upload keys on
+  another device's behalf.
+- `postman/...` — "3h" tests uploading a placeholder identity key
+  (real key material comes from libsignal on the Flutter side).
+- `docs/openapi.yaml` — documented `/users/keys`, bumped to 0.6.0.
+- `README.md` — added a note in the frontend section pointing at this
+  endpoint being ready for whenever libsignal generates real keys.
+
+**No changes needed to `internal/middleware/`** — this reuses the
+exact same `RequireAuth` + `DeviceChecker` built in Week 3, unchanged.
+
+**Your steps to test this:**
+
+```bash
+make migrate-up   # applies 000004
+make run
+```
+Run the Postman collection through Login, then "3h" → expect `200`
+with `identity_key_stored: true`, `signed_prekey_stored: false`,
+`one_time_prekeys_stored: 0`. Confirm in Postgres:
+```bash
+psql whatsapp_clone -c "SELECT device_id, registration_id FROM signal_identity_keys;"
+```
+
+**Checkpoint status:** ⬜ Pending your local verification. Today's
+actual Flutter checkpoint ("device generates and stores an Identity
+Key Pair locally") doesn't require calling this endpoint at all yet —
+it's a local-only step. This endpoint is ready for whenever it does.
+
+**Next up (Week 4, Day 4):** Build `GET /users/{userId}/keys` to
+return a user's public keys — Member 1 generates a Signed Pre-Key and
+a batch of One-Time Pre-Keys locally this same day. Checkpoint: all
+required key types are generated; keys can be fetched via the API.
+
+---
+
+## Week 4, Day 4 — GET /users/{userId}/keys
+
+**Goal (from schedule):** Build GET /users/{userId}/keys to return a
+user's public keys (Member 1: generate a Signed Pre-Key and a batch of
+One-Time Pre-Keys locally). Checkpoint: all required key types are
+generated; keys can be fetched via the API.
+
+**This is the most delicate logic built so far** — fetching a key
+bundle to start an encrypted session must atomically consume exactly
+one one-time pre-key, never handing the same one out twice (that's
+the entire point of a "one-time" key — reusing one breaks the forward
+secrecy guarantee for every session that key was used in).
+
+**What's included in today's package:**
+- `internal/keys/service.go` — new `GetUserKeyBundle`: returns one
+  bundle per active device belonging to the user (a real client must
+  open a separate encrypted session per device — multi-device isn't
+  formally built yet, but the schema and this response shape are
+  already ready for it). Devices missing an identity key or an active
+  signed prekey are silently skipped, not treated as an error — a
+  user with two devices, one of which hasn't finished key setup yet,
+  should still be reachable on the one that has.
+- `claimOneTimePrekey` — the actual atomic claim: a single
+  `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING
+  ...` statement, executed as raw SQL (not GORM's query builder — this
+  specific "claim one row from a queue" pattern doesn't map cleanly to
+  it). `FOR UPDATE SKIP LOCKED` means two people starting a chat with
+  the same device at nearly the same moment can never claim the same
+  key — whichever request's subquery runs second just skips the
+  locked row and finds the next one. Running out of one-time keys
+  returns `nil` (not an error) — X3DH is designed to degrade
+  gracefully to just the signed pre-key in that case.
+- `internal/keys/dto.go` — `KeyBundleResponse`/`DeviceKeyBundle`/etc.
+  One deliberate detail: `OneTimePrekey` is a pointer **without**
+  `omitempty`, so "none available" serializes as an explicit `null`,
+  not a silently missing field.
+- `internal/keys/handler.go` — `GetUserKeys`, reads `:userId` from the
+  path. Reachable for *any* user, not just yourself — that's the point
+  (Alice needs Bob's keys to message Bob).
+- `internal/server/server.go` — registers `GET /users/:userId/keys`.
+
+**Flagged, not hidden:** this route mixes static paths (`/me`,
+`/search`) with a wildcard (`/:userId/keys`) under one group. Gin
+v1.10 (what this project uses) has long supported this — static
+routes take priority over parameter matches — but since I can't
+compile-test here, if `make run` panics on startup mentioning a
+"wildcard conflict," that's this, and the fix is a quick route rename.
+Wanted this documented rather than silently assumed.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection in order — "3d" now auto-captures your
+`user_id`; "3h" uploads a placeholder key; "3i" fetches your own
+bundle back. Confirm in Postgres that a one-time prekey (if you've
+uploaded any) actually gets marked used after "3i" runs:
+```bash
+psql whatsapp_clone -c "SELECT key_id, is_used, used_at FROM signal_one_time_prekeys;"
+```
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 4, Day 5):** Validate incoming key formats/lengths on
+the server — Member 1 wires up automatic key upload right after
+registration completes, so new accounts upload their keys with no
+manual step. Checkpoint: new accounts automatically upload their
+public keys with no manual step.
+
+---
+
+## Week 4, Day 5 — Validate Key Formats/Lengths
+
+**Goal (from schedule):** Validate incoming key formats/lengths on
+the server (Member 1: automatically upload public keys right after
+registration completes, no manual step). Checkpoint: new accounts
+automatically upload their public keys with no manual step — this
+checkpoint belongs entirely to Member 1's Flutter work; today's
+backend contribution is what makes that upload actually get validated
+correctly once it happens.
+
+**A real, latent bug fixed today, found while writing this
+validation:** `SignedPrekeyInput.KeyID` and `OneTimePrekeyInput.KeyID`
+used `binding:"required"` — but Signal Protocol key IDs commonly start
+at 0, and Gin's `required` tag treats an int's zero value as "missing."
+Any client whose first prekey happened to be ID 0 would have had it
+silently rejected. Changed to `binding:"gte=0"`, which correctly
+allows 0 while still rejecting negative values.
+
+**What's included in today's package:**
+- `internal/keys/validation.go` — new file. `UploadKeysRequest.Validate()`
+  checks, beyond simple presence:
+  - Every public key / signature is valid base64 — tried against
+    standard, raw-standard, URL-safe, and raw-URL-safe variants before
+    rejecting, since it's not certain which exact flavor Flutter's
+    libsignal package will emit, and being needlessly strict about
+    encoding style risks rejecting perfectly valid keys.
+  - Public keys decode to **32 or 33 bytes** — both a raw Curve25519
+    point and Signal's type-byte-prefixed format are accepted, for the
+    same reason (not assuming which convention the client uses).
+  - Signed pre-key signatures decode to exactly **64 bytes** (XEdDSA).
+  - `registration_id` is between 1 and 16380 (Signal's 14-bit range).
+  - Deliberately does NOT attempt actual cryptographic point
+    validation (confirming the bytes are a valid Curve25519 point) —
+    that's a meaningfully bigger undertaking than "formats/lengths,"
+    and real Signal server implementations generally leave that to the
+    client-side Diffie-Hellman operation to reject if invalid anyway.
+- `internal/keys/handler.go` — calls `req.Validate()` after
+  `ShouldBindJSON` succeeds; a failure returns `400
+  INVALID_KEY_FORMAT` with the specific reason.
+- `internal/keys/validation_test.go` — new automated Go tests (13
+  cases), including a regression test specifically for the key_id=0
+  bug above, and a case confirming a bad key anywhere in a
+  one-time-prekey batch (not just the first entry) is still caught.
+- **A regression caught and fixed in the same pass:** the Day 3
+  Postman request ("3h") used a fake placeholder string
+  (`"base64-placeholder-identity-public-key"`) for the identity key,
+  which — now that real validation exists — would have started
+  failing with `400 INVALID_KEY_FORMAT`, breaking that request and the
+  downstream "3i" (fetch own bundle) that depends on it having
+  succeeded. Replaced with an actual randomly-generated, correctly-
+  sized (32-byte) base64 key, verified by decoding it back before use.
+- `postman/...` — added "3h2" testing a genuinely malformed key,
+  expecting `400 INVALID_KEY_FORMAT`.
+- `docs/openapi.yaml` — documented `INVALID_KEY_FORMAT`, bumped to 0.8.0.
+- `README.md` — restructured the frontend section: persistent "bugs to
+  fix" vs. "important behavior to know" subsections, since a
+  same-day-only "New today" callout was overwriting genuinely
+  still-relevant earlier warnings (like the Day 4 stateful-GET note)
+  instead of accumulating them. Caught this while writing today's
+  update and fixed it before it caused real information loss.
+
+**Your steps to test this:**
+
+```bash
+make test   # includes the new validation tests
+make run
+```
+Run the Postman collection in order — "3h" should succeed as before
+(now with real-format placeholder data), "3h2" should return `400
+INVALID_KEY_FORMAT`.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 4, Day 6, milestone, together):** Test with two real
+accounts on two devices/emulators: search for each other, fetch each
+other's public keys. GATE CHECK: two users can discover each other and
+exchange public keys.
+
+---
+
+## Week 4, Day 6 (milestone, together) — Gate Check 2
+
+**Goal (from schedule):** Test with two accounts on two
+devices/emulators: search for each other, fetch each other's public
+keys. Checkpoint: GATE CHECK — two users can discover each other and
+exchange public keys.
+
+**Backend readiness confirmed today:** re-ran the full structural
+verification suite across all Go files, migrations, and tests — all
+clean. This closes out Week 4's entire backend surface:
+`GET /users/me`, `GET /users/search`, `POST /users/keys`,
+`GET /users/{userId}/keys`, all behind the JWT + session-validation
+middleware from Week 3, all with standardized error codes, all
+documented in Postman and OpenAPI.
+
+**What's added today:** `docs/GATE_CHECK_2_TEST_SCRIPT.md` — a joint
+walkthrough for two real accounts on two real devices: create both →
+confirm both auto-uploaded their keys (the actual Day 5 checkpoint,
+verified via Postgres rather than assumed) → Account A searches for
+and fetches Account B's key bundle → confirms in Postgres that a
+one-time pre-key was actually consumed → repeat in reverse → fetch
+Account B's bundle a second time and confirm a **different** one-time
+key was consumed (or `null` if exhausted) — never the same key twice,
+which is the one thing here that would be a genuine security bug, not
+just a UX one.
+
+**This is a joint milestone day, not a solo backend day** — same as
+Week 3 Day 6, today's real work is the walkthrough itself, run
+together, not more code.
+
+**Checkpoint status:** ⬜ GATE CHECK 2 — pending the actual joint
+walkthrough.
+
+**Next up (Week 5, Day 1):** Build `POST /conversations` to create a
+conversation between two user IDs — Member 1 builds the Conversation
+List screen UI using static/placeholder data this same day. Checkpoint:
+calling the endpoint returns a new conversation ID.
+
+---
+
+## Week 5, Day 1 — POST /conversations
+
+**Goal (from schedule):** Build POST /conversations to create a
+conversation between two user IDs. Checkpoint: calling the endpoint
+returns a new conversation ID.
+
+**Week 5 is plaintext-first, deliberately** — per the original build
+plan's beginner tip: getting conversation/message plumbing right is
+hard enough without encryption mixed in. Encryption gets layered on
+cleanly in Week 6, on top of solid plumbing rather than tangled into it.
+
+**Beyond the literal checkpoint — a real requirement it doesn't spell
+out:** calling this endpoint again with the same participant must
+return the *existing* conversation, not create a duplicate. Without
+that, every time either person taps "message" on the other's profile
+would spawn a brand new, empty conversation — direct messaging would
+be unusable in practice within a few taps. Built as a real
+insert-or-find operation, not just insert.
+
+**What's included in today's package:**
+- `migrations/000005_create_conversations.up/down.sql` — `conversations`
+  and `conversation_participants`, from the approved schema (Section
+  3). Only what Week 5 actually needs — `group_details` and
+  `conversation_read_state` stay for whenever group chat / unread
+  counts are built.
+- `internal/models/conversation.go`, `conversation_participant.go` —
+  standard pattern, `BeforeCreate` hooks generating UUIDs explicitly.
+- `internal/conversations/service.go` — `CreateDirectConversation`:
+  validates `participant_id` is a real UUID and not the caller's own
+  ID, confirms the target is an active user (same rule as
+  `GET /users/search`), checks for an existing direct conversation via
+  a raw SQL join (`conversations` × `conversation_participants` twice,
+  once per user, both `is_active`), and only if none exists, creates
+  the conversation + both participant rows inside a single
+  `db.Transaction` — atomic, no risk of a conversation existing with
+  only one participant if something fails partway through.
+- `internal/conversations/handler.go` — maps each error to a specific
+  code (`INVALID_PARTICIPANT`, `CANNOT_MESSAGE_SELF`,
+  `PARTICIPANT_NOT_FOUND`), and picks `201` vs `200` based on whether
+  a new conversation was actually created — the client can tell "just
+  started this chat" from "already had this chat" from the status code
+  alone, no need to parse further.
+- `internal/server/server.go` — registers `POST /conversations` as a
+  direct route (not a group), matching `/health/protected`'s existing
+  style — deliberately, since there's only one conversation route so
+  far; a group makes sense once there are enough to warrant it.
+
+**Testing note — a real limitation, stated plainly:** unlike the
+middleware and key-validation tests, this logic is inherently a
+database operation (transactions, raw SQL joins) — I can't meaningfully
+unit-test it without a real Postgres connection, which isn't available
+in this sandbox. Rather than fake that with an in-memory substitute
+that wouldn't exercise the real Postgres-specific SQL anyway, the
+weight is on a thorough Postman sequence instead: self-messaging
+rejected, malformed ID rejected, nonexistent user rejected, a real
+create (**"3l"**, needs a second real user's ID — see its note), and
+critically, **calling create again with the same participant and
+confirming the SAME conversation ID comes back with a 200, not a new
+one with 201 ("3m")** — that's the one test that actually proves the
+idempotent behavior works, not just that creation works.
+
+**Docs updated:** `docs/openapi.yaml` (bumped to 0.9.0, also fixed a
+couple of stale descriptions left over from earlier weeks while in
+there), `README.md` (endpoint table, project structure, and a new
+"idempotent for direct conversations" note in the persistent behavior
+section).
+
+**Your steps to test this:**
+
+```bash
+make migrate-up   # applies 000005
+make run
+```
+Run the Postman collection through "3i", then "3j"/"3j2"/"3k" (all
+error cases). For "3l"/"3m", you'll need a second real, verified
+user's ID — register a second test account, put its `id` (from its own
+`GET /users/me`) into the `other_user_id` collection variable, then
+run "3l" (expect `201`) followed immediately by "3m" (expect `200`,
+same conversation `id`).
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 5, Day 2):** Build `GET /conversations` to list the
+logged-in user's conversations — Member 1 builds the Chat screen UI
+using static/placeholder data this same day. Checkpoint: Conversation
+List UI renders placeholder data correctly (Member 1's checkpoint;
+backend's contribution is the list endpoint itself).
+
+---
+
+## Week 5, Day 2 — GET /conversations
+
+**Goal (from schedule):** Build GET /conversations to list the logged-
+in user's conversations (Member 1: build the Chat screen UI using
+static/placeholder messages). Checkpoint: Conversation List UI renders
+placeholder data correctly — Member 1's checkpoint; today's backend
+work is what that screen gets wired to next, once messages exist to
+make the ordering real.
+
+**What's included in today's package:**
+- `internal/conversations/service.go` — new `ListConversations`.
+  Deliberately built as **3 fixed queries total**, regardless of how
+  many conversations exist, instead of looping and querying per
+  conversation:
+  1. The caller's conversations (joined against
+     `conversation_participants` to filter to ones they're an active
+     member of).
+  2. Batch-load of "the other participant" per conversation.
+  3. Batch-load of those participants' actual profile info.
+
+  A conversation list is exactly the kind of endpoint that gets called
+  often (every app open, every pull-to-refresh), so an N+1 query
+  pattern here would matter in practice, not just in theory.
+- **A real risk caught and fixed while writing this query:** both
+  `conversations` and `conversation_participants` have a column named
+  `id`. A bare `SELECT *` across the join would be ambiguous —
+  Postgres would reject it outright. Rather than trust GORM's default
+  join-handling to scope this correctly on its own, added an explicit
+  `.Select("conversations.*")` so the generated SQL is unambiguous
+  regardless of GORM's internal behavior. Same principle as the UUID
+  bug fix a few weeks back: don't rely on implicit ORM behavior when
+  being explicit costs one line and removes the whole question.
+- **A missing import caught before it became a compile error:** added
+  `time.RFC3339` formatting to the new code and initially forgot the
+  `"time"` import in `service.go` — caught on the immediate next
+  review pass, same discipline as every other file this build.
+- `internal/conversations/dto.go` — `ListConversationsResponse`,
+  `ConversationListItem`, `ConversationParticipantSummary` (same safe
+  profile subset as search results — no phone/email for someone other
+  than yourself).
+- `internal/conversations/handler.go` — `List`, reads the caller's ID
+  from the JWT same as everywhere else.
+- `internal/server/server.go` — registers `GET /conversations`
+  alongside the existing `POST /conversations` — same path, different
+  HTTP method, no ambiguity risk (unlike Week 4's static-vs-wildcard
+  concern, this is just two ordinary routes on separate method trees).
+
+**Flagged, not silently shipped as final:** the list is currently
+sorted by conversation creation time. That's a placeholder — a real
+chat app sorts by most recent message, which doesn't exist as a
+concept yet (that's Day 3-4 this week). Both the OpenAPI doc and
+`README.md` say this explicitly, so nobody builds UI assuming today's
+ordering is permanent.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection through "3n" — should return `200` with a
+`conversations` array containing the conversation created in "3l"/"3m".
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 5, Day 3):** Build `POST /messages` to store a
+plaintext test message — Member 1 sets up the local Drift database
+schema (users, conversations, messages tables) this same day.
+Checkpoint: local Drift DB is created; a test message is stored in
+PostgreSQL.

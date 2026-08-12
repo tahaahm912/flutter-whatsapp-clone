@@ -49,3 +49,36 @@ func (h *Handler) Me(c *gin.Context) {
 		CreatedAt:       user.CreatedAt.Format(time.RFC3339),
 	})
 }
+
+// Search handles GET /users/search?phone=... or ?email=....
+func (h *Handler) Search(c *gin.Context) {
+	var req SearchUserRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "invalid request",
+			"code":    "VALIDATION_ERROR",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	user, err := h.service.Search(c.Request.Context(), req.Phone, req.Email)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrSearchParamRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "SEARCH_PARAM_REQUIRED"})
+		case errors.Is(err, ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "no matching user found", "code": "USER_NOT_FOUND"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error", "code": "INTERNAL_ERROR"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, SearchUserResponse{
+		ID:              user.ID.String(),
+		Name:            user.Name,
+		About:           user.AboutText,
+		ProfilePhotoURL: user.ProfilePhotoURL,
+	})
+}
