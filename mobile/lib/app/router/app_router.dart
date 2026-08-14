@@ -1,7 +1,7 @@
 import 'package:go_router/go_router.dart';
 
 import '../../core/storage/secure_storage.dart';
-
+import '../../features/chat/chat_screen.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/auth/login/login_screen.dart';
 import '../../features/auth/register/register_screen.dart';
@@ -99,6 +99,18 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/new-contact',
       builder: (context, state) => const NewContactScreen(),
+    ),
+
+    GoRoute(
+      path: '/chat',
+      builder: (context, state) {
+        final args = state.extra as Map<String, dynamic>;
+
+        return ChatScreen(
+          name: args['name'] as String,
+          avatar: args['avatar'] as String,
+        );
+      },
     ),
   ],
 );

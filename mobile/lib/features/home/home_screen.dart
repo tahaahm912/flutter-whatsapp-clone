@@ -133,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: _buildBottomNavigationBar(),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          context.push('/contacts/new');
+          context.push('/new-contact');
         },
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.surface,
