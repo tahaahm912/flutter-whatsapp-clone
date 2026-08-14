@@ -69,6 +69,26 @@ Full details, plus anything found in future days, are kept in
   messages yet to sort by "most recent message," which is what a real
   chat app's list should actually do. Don't build UI that assumes this
   ordering is final.
+- **`POST /messages` stores plaintext, deliberately, for now.** Week 5
+  is plaintext-first per the build plan — `body` is sent and stored as
+  plain text; Week 6 replaces this with real per-device Signal
+  Protocol ciphertext, but the API shape shouldn't need to change.
+  `client_message_id` is required and must be freshly generated per
+  message — retrying the same one is safe (returns the original
+  message), but reusing one across two different conversations is a
+  client bug and returns `409`.
+- **A sent message is NOT echoed back to the sender via any GET
+  endpoint.** The sender's own client is expected to store its own
+  sent message locally (this is what the Drift local database, built
+  the same day as this endpoint, is for) rather than fetch it back
+  from the server — this matches how real Signal-protocol clients
+  work, not a missing feature.
+- **`GET /messages/{conversationId}` is per-device, not per-user, and
+  has a side effect.** It returns messages delivered to the calling
+  device specifically (a user with two devices would get different
+  results from each). Fetching a message that's still marked "sent"
+  updates it to "delivered" as part of serving the response — this is
+  the delivery-receipt mechanism, not a caching quirk.
 
 ## Prerequisites
 
@@ -138,6 +158,8 @@ into Postman — 15 requests covering the full flow in run order.
 | GET | `/users/{userId}/keys` | Yes | Fetch a user's key bundle(s) to start an encrypted session |
 | POST | `/conversations` | Yes | Create (or find existing) a direct conversation |
 | GET | `/conversations` | Yes | List your conversations |
+| POST | `/messages` | Yes | Send a message (plaintext during Week 5) |
+| GET | `/messages/{conversationId}` | Yes | Retrieve this device's messages for a conversation |
 
 **"Auth required" = `Authorization: Bearer <access_token>` header.**
 Get one from `/auth/login`.
@@ -158,6 +180,7 @@ backend/
 │   ├── users/                  # Profile data (GET /users/me, /users/search)
 │   ├── keys/                    # Signal Protocol public key storage (POST /users/keys)
 │   ├── conversations/            # Conversation creation (POST /conversations)
+│   ├── messages/                 # Message sending (POST /messages)
 │   ├── server/                 # Gin engine setup + route registration
 │   └── health/                 # GET /health handler
 ├── migrations/                 # versioned SQL schema (golang-migrate), source of truth

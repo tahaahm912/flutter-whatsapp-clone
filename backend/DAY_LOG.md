@@ -1804,3 +1804,293 @@ plaintext test message — Member 1 sets up the local Drift database
 schema (users, conversations, messages tables) this same day.
 Checkpoint: local Drift DB is created; a test message is stored in
 PostgreSQL.
+
+---
+
+## Week 5, Day 3 — POST /messages
+
+**Goal (from schedule):** Build POST /messages to store a plaintext
+test message (Member 1: set up the local Drift database schema —
+users, conversations, messages tables). Checkpoint: local Drift DB is
+created; a test message is stored in PostgreSQL.
+
+**You asked me to make sure this was bug-free, so here's the full
+account of what that meant in practice today — not just "I wrote
+tests," but the actual reasoning and the real issues caught.**
+
+**The design tension resolved upfront:** the approved schema's
+`message_recipients.ciphertext` column is `NOT NULL`, designed from
+day one for real per-device encryption — but Week 5 is deliberately
+plaintext-first. Resolution: store plaintext directly in that column
+for now. This requires **zero schema change** when Week 6 adds real
+encryption — the column was always just `TEXT`; only what the
+application writes into it changes. Documented prominently in the
+migration file itself so this isn't a surprise later.
+
+**A second design decision, also resolved deliberately:** the sender
+does **not** get a `message_recipients` row for their own message.
+This matches how real Signal-protocol clients actually work — the
+sender already has the message (they just typed it) and stores it
+locally rather than fetching it back from the server. This is
+literally why Member 1's Day 3 task is setting up a local Drift
+database *today* — the two pieces are designed to fit together.
+
+**What's included in today's package:**
+- `migrations/000006_create_messages.up/down.sql` — `messages` and
+  `message_recipients`, from the approved schema (Section 4).
+- `internal/models/message.go`, `message_recipient.go` — standard
+  pattern.
+- `internal/messages/service.go` — `SendMessage`:
+  1. Validates `conversation_id`/`client_message_id` are real UUIDs.
+  2. Confirms the caller is an active participant (`403` if not —
+     you can't send into a conversation you're not part of).
+  3. Inside a single transaction: creates the `messages` row, then
+     fans out to `message_recipients` for every OTHER active
+     participant's active devices (never the sender's).
+  4. **Idempotent retry handling**: if `(sender_device_id,
+     client_message_id)` already exists (the client retrying after a
+     lost response), the transaction is caught via the unique-
+     constraint error, rolled back cleanly, and the *existing* message
+     is returned (`200`) instead of erroring or duplicating.
+- **A real edge case caught and guarded against, not just assumed
+  away:** the dedup index is scoped to `(sender_device_id,
+  client_message_id)` only — NOT per-conversation. A client that
+  (incorrectly) reused the same `client_message_id` across two
+  different conversations would otherwise silently get back a message
+  from the *wrong* conversation. Added an explicit check: if the
+  existing message's `conversation_id` doesn't match the request's,
+  return `409 CLIENT_MESSAGE_ID_REUSED` instead of a misleading
+  success.
+- **A real Postgres transaction-semantics detail gotten right, not
+  glossed over:** once any statement in a transaction errors, Postgres
+  marks the *whole transaction* aborted — every subsequent statement
+  in it fails too, until rollback. The duplicate-key handling stops
+  immediately on detecting the conflict rather than attempting the
+  recipient fan-out afterward, and the post-rollback lookup correctly
+  uses a fresh `s.db` handle, not the now-dead `tx`.
+- `internal/messages/handler.go` — maps each error to a specific code,
+  `201`/`200` based on `WasCreated`, same pattern as conversations.
+- `internal/server/server.go` — registers `POST /messages`.
+
+**Testing approach, stated honestly:** like `POST /conversations`,
+this logic is inherently transaction/DB-bound — no meaningful chunk of
+pure logic to unit-test without a real Postgres connection. Weight is
+on a thorough Postman sequence instead: reject sending into a
+conversation you're not in ("3o"), send a real message ("3p"), then
+**prove the idempotency actually works** by retrying with the exact
+same `client_message_id` and confirming the same message comes back
+("3q").
+
+**A real bug caught and fixed while building that Postman sequence,
+not after:** "3p"'s test script tried to capture the
+`client_message_id` it had just sent by re-evaluating `{{$guid}}` —
+but Postman's `{{$guid}}` generates a **new random value every time
+it's evaluated**, so the "captured" value would never have matched
+what was actually sent, silently breaking "3q"'s entire premise. Fixed
+by generating the ID once in a pre-request script and having both the
+request body and the follow-up request reference that same stored
+value.
+
+**Your steps to test this:**
+
+```bash
+make migrate-up   # applies 000006
+make run
+```
+Run the Postman collection through "3n", then "3o" (expect `403`),
+"3p" (expect `201`), "3q" (expect `200`, same message `id` as "3p").
+Confirm in Postgres:
+```sql
+SELECT id, conversation_id, message_type, created_at FROM messages;
+SELECT recipient_user_id, status, ciphertext FROM message_recipients;
+```
+`ciphertext` will show the actual plaintext body — expected during
+Week 5, not a leak.
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 5, Day 4):** Build `GET /messages/{conversationId}` to
+retrieve a conversation's messages — Member 1 connects the
+Conversation List screen to the real API, caching results in Drift,
+this same day. Checkpoint: Conversation List loads real data from the
+backend.
+
+---
+
+## Week 5, Day 4 — GET /messages/{conversationId}
+
+**Goal (from schedule):** Build GET /messages/{conversationId} to
+retrieve a conversation's messages (Member 1: connect the
+Conversation List screen to the real API, cache results in Drift).
+Checkpoint: Conversation List loads real data from the backend.
+
+**Schedule note, stated upfront:** the actual schedule splits this
+into two days — Day 4 builds retrieval, **Day 5 separately adds
+pagination**. I built pagination (`limit` + `before_message_id` cursor)
+as part of today's work instead of waiting, because the schema's own
+`idx_messages_conversation_time` index was clearly designed for
+exactly this access pattern ("give me the last N messages, ordered"),
+and building the query without limit/cursor support today would have
+meant rewriting it tomorrow rather than extending it. Not a mistake —
+but it means Day 5's backend piece is already essentially done; what's
+actually left for Day 5 is on Member 1's side (connecting the Chat
+screen to send/receive).
+
+**Two real design decisions made deliberately today, not just the
+literal checkpoint:**
+
+1. **Per-device, not per-user.** `message_recipients` is per-device by
+   schema design, so this endpoint returns what was delivered to the
+   **calling device specifically** — a user logged in on two devices
+   would get different results from each, correctly. The query filters
+   on `recipient_device_id`, not just `recipient_user_id`.
+2. **Fetching is the delivery event.** Any returned message still
+   marked `sent` for this device is updated to `delivered` as part of
+   serving the response — giving real purpose to the schema's
+   `status`/`delivered_at` columns rather than leaving them unused.
+   This update is deliberately best-effort (logged, not fatal) — a
+   secondary bookkeeping failure shouldn't block the primary read,
+   same pattern as `devices.last_active_at` elsewhere in this codebase.
+
+**A real ambiguous-column risk, same class as Day 2's, caught and
+handled the same way:** both `messages` and `message_recipients` have
+their own `id` column. Every single selected column in this join is
+given an explicit SQL alias (`mr.id AS recipient_row_id`, `m.id AS
+message_id`, etc.) rather than trusting any ORM default scoping —
+directly applying the lesson from two days ago instead of re-learning
+it.
+
+**Code cleanup done in the same pass:** the "is this user an active
+participant" check existed only in `SendMessage` before today.
+Extracted into a shared `isActiveParticipant` helper so `ListMessages`
+reuses the exact same logic rather than risking two slowly-diverging
+copies of the same authorization check — the kind of duplication that
+quietly becomes a security gap later if one copy gets updated and the
+other doesn't.
+
+**What's included in today's package:**
+- `internal/messages/service.go` — `ListMessages`, `isActiveParticipant`
+  (extracted), `messageListRow` (explicitly-aliased join destination).
+- `internal/messages/handler.go` — `List`, maps `INVALID_CONVERSATION_ID`
+  / `NOT_A_PARTICIPANT` / `INVALID_BEFORE_MESSAGE_ID`.
+- `internal/messages/dto.go` — `ListMessagesQuery` (limit clamped,
+  not rejected, if out of range), `ListMessagesResponse`,
+  `MessageListItem`.
+- `internal/server/server.go` — registers `GET /messages/:conversationId`
+  (different HTTP method than `POST /messages`, so — unlike Week 4's
+  static-vs-wildcard situation — genuinely zero routing ambiguity risk
+  here; different methods are separate trees entirely).
+- `postman/...` — "3r" (fetch as sender, confirm empty — the
+  don't-see-your-own-message design, working as intended, not a bug),
+  "3r2"/"3r3" (not-a-participant, malformed ID). Noted plainly where
+  this single-account collection's testing runs out: actually seeing a
+  *received*, delivered message requires the second account's real
+  session, which isn't something this collection structure automates —
+  said so directly rather than faking a passing test.
+- `docs/openapi.yaml` — documented `/messages/{conversationId}`,
+  bumped to 0.12.0.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the Postman collection through "3q", then "3r" (expect `200`,
+empty array — correct, not a bug), "3r2"/"3r3" (error cases). To see
+an actual received/delivered message: log in as the second account
+(`other_user_id`'s owner) and call
+`GET /messages/{{conversation_id}}` with **their** access token —
+expect the message from "3p", with `status: "delivered"`. Confirm in
+Postgres:
+```sql
+SELECT recipient_user_id, status, delivered_at FROM message_recipients WHERE message_id = '<message id from 3p>';
+```
+
+**Checkpoint status:** ⬜ Pending your local verification.
+
+**Next up (Week 5, Day 5):** Pagination is already done (see above) —
+remaining backend work today, if any, is testing support for Member 1
+connecting the Chat screen to send/receive plaintext messages over
+REST. Checkpoint: two accounts can exchange a plaintext message
+through the real API.
+
+---
+
+## Week 5, Day 5 — Two-Account Testing (Pagination + Delivery, For Real)
+
+**Goal (from schedule):** Add pagination to the message retrieval
+endpoint. Checkpoint: two accounts can exchange a plaintext message
+through the real API. **Already done:** pagination was built as part
+of Day 4's work (see that entry for why). So today has zero new
+backend *code* — instead, today closes a real testing gap I'd flagged
+twice already (Day 4's delivery-status note, and pagination needing
+the same thing) rather than flag it a third time.
+
+**The gap:** verifying delivery-status transitions and pagination
+both genuinely require a *second* real account's session — by design,
+a sender never receives their own message, so testing "does the
+recipient actually get it, with the right status" needs someone else
+logged in. The collection only ever tracked one account. Today's
+actual checkpoint — *"two accounts can exchange a message"* — is
+fundamentally a two-account scenario anyway, so this was the right day
+to fix it properly instead of continuing to describe it as a manual
+step.
+
+**What's included in today's package:**
+- `postman/...` — Account B is now a first-class part of the
+  collection, not a manual aside:
+  - **B1-B3**: registers, verifies, and logs in a second real account,
+    with its own token variables (`access_token_b`,
+    `refresh_token_b`, `user_id_b`). B3's login response automatically
+    populates `other_user_id` too, so the existing 3l/3m requests need
+    no manual copy-pasting anymore.
+  - **B4-B6**: Account A sends 3 more messages (4 total with "3p"),
+    specifically to have enough messages for pagination to be
+    meaningful — 1-2 messages can't actually demonstrate "load an
+    older page."
+  - **B7**: Account B fetches with `limit=2` — asserts exactly 2
+    messages, and (the actual point) asserts **every one has status
+    `delivered`**, having been `sent` immediately beforehand. This is
+    the real, working proof of Day 4's delivery-status feature, not
+    just a code review of it.
+  - **B8**: fetches the older page via `before_message_id`, asserting
+    the two pages don't overlap.
+  - **B9**: malformed cursor → `400 INVALID_BEFORE_MESSAGE_ID`.
+
+**A real ordering bug caught before it shipped, not after:** my first
+pass placed the new Account B setup (B1-B3) *after* the existing
+3l/3m requests in the collection, even though B3 is what populates
+`other_user_id` for 3l/3m to use. Run top-to-bottom as originally
+built, 3l would have executed before that variable was ever set — the
+exact same category of bug as Week 3 Day 3's OTP test ordering and
+Week 3 Day 4's protected-route ordering. Caught it by checking the
+actual list positions numerically before finalizing, not just trusting
+that "I added it, so it must be fine" — moved the whole Account B
+setup block to right before 3j, ahead of everything that depends on it.
+
+**Not tested today, stated plainly:** `before_message_id` referring to
+a message in a *different* conversation (the defensive
+`conversation_id` scoping added on Day 4) isn't exercised by an
+integration test — it would need a third conversation just for that
+one case, and I judged that not worth the added complexity today. It
+was verified by manual code review at the time, not by a running test
+— worth knowing the difference.
+
+**Your steps to test this:**
+
+```bash
+make run
+```
+Run the full collection top-to-bottom. You'll need **two separate OTP
+codes** from the server console this time — one for Account A (early
+in the run) and one for Account B ("B1"/"B2", shortly after). Watch
+for `B7`'s console log calling out exactly what it's proving.
+
+**Checkpoint status:** ⬜ Pending your local verification — this one
+directly is today's actual checkpoint, not just supporting evidence
+for it.
+
+**Next up (Week 5, Day 6, milestone, together):** Full test together —
+create a conversation, send and receive several plaintext messages.
+GATE CHECK: the messaging pipeline works end-to-end before encryption
+is added.

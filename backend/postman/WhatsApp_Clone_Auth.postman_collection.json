@@ -40,6 +40,42 @@
     {
       "key": "conversation_id",
       "value": ""
+    },
+    {
+      "key": "message_id",
+      "value": ""
+    },
+    {
+      "key": "last_client_message_id",
+      "value": ""
+    },
+    {
+      "key": "identifier_b",
+      "value": "+14155552672"
+    },
+    {
+      "key": "password_b",
+      "value": "correcthorsebattery2"
+    },
+    {
+      "key": "otp_code_b",
+      "value": "REPLACE_ME_FROM_SERVER_CONSOLE"
+    },
+    {
+      "key": "access_token_b",
+      "value": ""
+    },
+    {
+      "key": "refresh_token_b",
+      "value": ""
+    },
+    {
+      "key": "user_id_b",
+      "value": ""
+    },
+    {
+      "key": "pagination_cursor",
+      "value": ""
     }
   ],
   "item": [
@@ -455,6 +491,103 @@
       ]
     },
     {
+      "name": "B1. [Account B] Register",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Test User B\",\n  \"phone_number\": \"{{identifier_b}}\",\n  \"password\": \"{{password_b}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () { pm.response.to.have.status(201); });",
+              "console.log('Check the server console for Account B\\'s OTP code (a SECOND, different line from Account A\\'s), then paste it into the otp_code_b collection variable.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B2. [Account B] Verify OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/verify-otp",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"{{identifier_b}}\",\n  \"code\": \"{{otp_code_b}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 and account is active', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().account_status).to.eql('active');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B3. [Account B] Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"{{identifier_b}}\",\n  \"password\": \"{{password_b}}\",\n  \"device_name\": \"Postman B\",\n  \"platform\": \"web\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200, tokens present, user_id_b + other_user_id set', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.access_token).to.be.a('string').and.not.empty;",
+              "  pm.collectionVariables.set('access_token_b', data.access_token);",
+              "  pm.collectionVariables.set('refresh_token_b', data.refresh_token);",
+              "  pm.collectionVariables.set('user_id_b', data.user.id);",
+              "  // Feeds the EXISTING 3l/3m requests (Account A creating a",
+              "  // conversation with 'other_user_id') with Account B's REAL id,",
+              "  // instead of needing manual copy-pasting.",
+              "  pm.collectionVariables.set('other_user_id', data.user.id);",
+              "});",
+              "console.log('other_user_id is now Account B\\'s real id. Go back and run 3l/3m now if you have not already, using this real second account.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "3j. POST /conversations with self (expect 400)",
       "request": {
         "method": "POST",
@@ -557,7 +690,7 @@
       ]
     },
     {
-      "name": "3l. POST /conversations (create) - NOTE: needs a second real user's ID",
+      "name": "3l. POST /conversations (create, with Account B)",
       "request": {
         "method": "POST",
         "header": [
@@ -588,7 +721,7 @@
               "  pm.expect(data.type).to.eql('direct');",
               "  pm.collectionVariables.set('conversation_id', data.id);",
               "});",
-              "console.log('Set the other_user_id collection variable to a second real, verified user before running this \u2014 e.g. register a second account first, or run this against a teammate\\'s test user.');"
+              "console.log('other_user_id was set automatically by B3 (Account B Login) - no manual copy-pasting needed.');"
             ]
           }
         }
@@ -659,6 +792,388 @@
               "    const found = data.conversations.some(c => c.id === convId);",
               "    pm.expect(found).to.be.true;",
               "  }",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3o. POST /messages to a conversation you're not in (expect 403)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"client_message_id\": \"{{$guid}}\",\n  \"body\": \"this should be rejected\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 403 with NOT_A_PARTICIPANT', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().code).to.eql('NOT_A_PARTICIPANT');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3p. POST /messages (send a real message)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"client_message_id\": \"{{last_client_message_id}}\",\n  \"body\": \"Hello from Postman\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Generate the client_message_id ONCE here and store it, so the",
+              "// request body and the test script (and 3q afterward) all use the",
+              "// exact same value. {{$guid}} evaluates to a NEW random value every",
+              "// time it's referenced, so using it directly in the body and then",
+              "// trying to read it back in the test script would NOT match.",
+              "pm.collectionVariables.set('last_client_message_id', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201 (newly created)', function () {",
+              "  pm.response.to.have.status(201);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.be.a('string').and.not.empty;",
+              "  pm.expect(data.body).to.eql('Hello from Postman');",
+              "  pm.collectionVariables.set('message_id', data.id);",
+              "});",
+              "console.log('Requires conversation_id to already be set (from 3l/3m) - run those first.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3q. POST /messages again with SAME client_message_id (expect 200, same message id - idempotent retry)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"client_message_id\": \"{{last_client_message_id}}\",\n  \"body\": \"Hello from Postman\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 (retry) with the SAME message id as 3p', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.id).to.eql(pm.collectionVariables.get('message_id'));",
+              "});",
+              "console.log('This proves the retry-safety: same device + same client_message_id must never create a duplicate message.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3r. GET /messages/{conversationId} as sender (expect empty - senders don't receive their own sends)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/{{conversation_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with an empty messages array', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.messages).to.be.an('array').that.is.empty;",
+              "});",
+              "console.log('This is expected, not a bug: the sender never receives their own message via this API (see README/DAY_LOG). To see a DELIVERED message and verify the sent->delivered status transition, log in as the SECOND account (other_user_id) and call this same endpoint with THEIR access_token instead.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3r2. GET /messages/{conversationId} for a conversation you're not in (expect 403)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/00000000-0000-0000-0000-000000000000"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 403 with NOT_A_PARTICIPANT', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().code).to.eql('NOT_A_PARTICIPANT');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3r3. GET /messages/{conversationId} with malformed conversation ID (expect 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/not-a-valid-uuid"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with INVALID_CONVERSATION_ID', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('INVALID_CONVERSATION_ID');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B4. [Account A] Send message 2 of 4 (for pagination testing)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"client_message_id\": \"{{$guid}}\",\n  \"body\": \"Message 2\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B5. [Account A] Send message 3 of 4",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"client_message_id\": \"{{$guid}}\",\n  \"body\": \"Message 3\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B6. [Account A] Send message 4 of 4",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}"
+          }
+        ],
+        "url": "{{base_url}}/messages",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"client_message_id\": \"{{$guid}}\",\n  \"body\": \"Message 4\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B7. [Account B] Fetch messages, limit=2 (page 1 - newest)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token_b}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/{{conversation_id}}?limit=2"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with exactly 2 messages, all delivered', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.messages).to.have.lengthOf(2);",
+              "  data.messages.forEach(m => pm.expect(m.status).to.eql('delivered'));",
+              "  // Response is oldest-first; the FIRST item on this page is the",
+              "  // pagination cursor for 'give me messages older than this'.",
+              "  pm.collectionVariables.set('pagination_cursor', data.messages[0].id);",
+              "});",
+              "console.log('This is the real proof of Day 4\\'s delivery-status feature: these were still \\'sent\\' before this exact request.');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B8. [Account B] Fetch older page via before_message_id (page 2 - oldest, no overlap with page 1)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token_b}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/{{conversation_id}}?before_message_id={{pagination_cursor}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200 with the remaining older messages, none overlapping page 1', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.messages.length).to.be.at.least(1);",
+              "  const cursor = pm.collectionVariables.get('pagination_cursor');",
+              "  const overlap = data.messages.some(m => m.id === cursor);",
+              "  pm.expect(overlap, 'page 2 must not include the cursor message itself').to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "B9. [Account B] Fetch with malformed before_message_id (expect 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token_b}}"
+          }
+        ],
+        "url": "{{base_url}}/messages/{{conversation_id}}?before_message_id=not-a-uuid"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 400 with INVALID_BEFORE_MESSAGE_ID', function () {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().code).to.eql('INVALID_BEFORE_MESSAGE_ID');",
               "});"
             ]
           }

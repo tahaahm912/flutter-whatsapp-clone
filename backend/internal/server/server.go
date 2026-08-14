@@ -11,6 +11,7 @@ import (
 	"whatsapp-clone-backend/internal/conversations"
 	"whatsapp-clone-backend/internal/health"
 	"whatsapp-clone-backend/internal/keys"
+	"whatsapp-clone-backend/internal/messages"
 	"whatsapp-clone-backend/internal/middleware"
 	"whatsapp-clone-backend/internal/otp"
 	"whatsapp-clone-backend/internal/users"
@@ -24,15 +25,16 @@ import (
 // and the feature handlers built on top of them) so there's a single
 // place new dependencies get threaded through as the project grows.
 type Server struct {
-	engine              *gin.Engine
-	db                  *gorm.DB
-	redis               *redis.Client
-	authHandler         *auth.Handler
-	usersHandler        *users.Handler
-	keysHandler         *keys.Handler
+	engine               *gin.Engine
+	db                   *gorm.DB
+	redis                *redis.Client
+	authHandler          *auth.Handler
+	usersHandler         *users.Handler
+	keysHandler          *keys.Handler
 	conversationsHandler *conversations.Handler
-	jwtSecret           string
-	deviceChecker       middleware.DeviceChecker
+	messagesHandler      *messages.Handler
+	jwtSecret            string
+	deviceChecker        middleware.DeviceChecker
 }
 
 // New builds a Server with all routes registered.
@@ -49,6 +51,8 @@ func New(database *gorm.DB, redisClient *redis.Client, jwtSecret string) *Server
 	keysHandler := keys.NewHandler(keysService)
 	conversationsService := conversations.NewService(database)
 	conversationsHandler := conversations.NewHandler(conversationsService)
+	messagesService := messages.NewService(database)
+	messagesHandler := messages.NewHandler(messagesService)
 
 	s := &Server{
 		engine:               engine,
@@ -58,6 +62,7 @@ func New(database *gorm.DB, redisClient *redis.Client, jwtSecret string) *Server
 		usersHandler:         usersHandler,
 		keysHandler:          keysHandler,
 		conversationsHandler: conversationsHandler,
+		messagesHandler:      messagesHandler,
 		jwtSecret:            jwtSecret,
 		deviceChecker:        deviceChecker,
 	}
@@ -105,10 +110,12 @@ func (s *Server) registerRoutes() {
 	usersGroup.POST("/keys", s.keysHandler.UploadKeys)
 	usersGroup.GET("/:userId/keys", s.keysHandler.GetUserKeys)
 
-	// Week 5: conversations/messages. Registered as a direct route
-	// (not a group) for now, matching /health/protected's style —
-	// more conversation routes will likely justify a group once there
-	// are enough of them to warrant one.
+	// Week 5: conversations/messages. Registered as direct routes (not
+	// groups) for now, matching /health/protected's style — a group
+	// makes sense once there are enough routes per resource to warrant
+	// one.
 	s.engine.POST("/conversations", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), s.conversationsHandler.Create)
 	s.engine.GET("/conversations", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), s.conversationsHandler.List)
+	s.engine.POST("/messages", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), s.messagesHandler.Send)
+	s.engine.GET("/messages/:conversationId", middleware.RequireAuth(s.jwtSecret, s.deviceChecker), s.messagesHandler.List)
 }
