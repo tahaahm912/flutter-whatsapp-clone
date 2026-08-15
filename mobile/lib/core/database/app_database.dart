@@ -9,6 +9,10 @@ import 'tables/users.dart';
 import 'tables/conversations.dart';
 import 'tables/messages.dart';
 
+import 'daos/users_dao.dart';
+import 'daos/conversations_dao.dart';
+import 'daos/messages_dao.dart';
+
 part 'app_database.g.dart';
 
 @DriftDatabase(
@@ -16,6 +20,11 @@ part 'app_database.g.dart';
     Users,
     Conversations,
     Messages,
+  ],
+  daos: [
+    UsersDao,
+    ConversationDao,
+    MessagesDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -30,7 +39,7 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (Migrator m, int from, int to) async {
-          // Future database migrations go here.
+          // Future migrations go here.
         },
       );
 }

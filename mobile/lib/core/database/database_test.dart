@@ -1,107 +1,125 @@
 import 'package:drift/drift.dart';
 
 import 'app_database.dart';
+import 'tables/messages.dart';
 
-Future<void> testDatabase() async {
-  final database = AppDatabase();
+Future<void> testMessagesDatabase(AppDatabase db) async {
+  print('========== BLULINK MESSAGE DB TEST ==========');
 
-  try {
-    // ------------------------------------------------------------
-    // INSERT USER
-    // ------------------------------------------------------------
+  // Start with a clean database for this test.
+  await db.messagesDao.clearMessages();
 
-    await database.into(database.users).insert(
-      UsersCompanion.insert(
-        userId: 'user_test_001',
-        name: 'Test User',
-        phone: const Value('+923001234567'),
-        email: const Value('test@blulink.com'),
-        about: const Value('Testing BluLink database'),
-      ),
-    );
+  // -----------------------------------------
+  // TEST 1: Insert my message
+  // -----------------------------------------
 
-    print('User inserted successfully.');
+  final insertedId = await db.messagesDao.insertMessage(
+    MessagesCompanion.insert(
+      messageId: 'test-message-001',
+      conversationId: 'conversation-001',
+      senderId: 'user-001',
+      receiverId: 'user-002',
+      content: 'Hello from Taha!',
+      isMe: const Value(true),
+      sentAt: DateTime.now(),
+    ),
+  );
 
-    // ------------------------------------------------------------
-    // INSERT CONVERSATION
-    // ------------------------------------------------------------
+  print('Inserted SQLite row ID: $insertedId');
 
-    await database.into(database.conversations).insert(
-      ConversationsCompanion.insert(
-        conversationId: 'conversation_test_001',
-        otherUserId: 'user_test_002',
-        otherUserName: 'Test Friend',
-        otherUserAvatar: const Value(null),
-        lastMessage: const Value('Hello BluLink!'),
-        lastMessageAt: Value(DateTime.now()),
-      ),
-    );
+  // -----------------------------------------
+  // TEST 2: Read message by messageId
+  // -----------------------------------------
 
-    print('Conversation inserted successfully.');
+  final message =
+      await db.messagesDao.getMessageById(
+    'test-message-001',
+  );
 
-    // ------------------------------------------------------------
-    // INSERT MESSAGE
-    // ------------------------------------------------------------
-
-    await database.into(database.messages).insert(
-      MessagesCompanion.insert(
-        messageId: 'message_test_001',
-        conversationId: 'conversation_test_001',
-        senderId: 'user_test_001',
-        receiverId: 'user_test_002',
-        content: 'Hello BluLink!',
-        isMe: const Value(true),
-        sentAt: DateTime.now(),
-      ),
-    );
-
-    print('Message inserted successfully.');
-
-    // ------------------------------------------------------------
-    // READ USERS
-    // ------------------------------------------------------------
-
-    final users = await database.select(database.users).get();
-
-    print('Users in database:');
-
-    for (final user in users) {
-      print(
-        '${user.userId} - ${user.name}',
-      );
-    }
-
-    // ------------------------------------------------------------
-    // READ CONVERSATIONS
-    // ------------------------------------------------------------
-
-    final conversations =
-        await database.select(database.conversations).get();
-
-    print('Conversations in database:');
-
-    for (final conversation in conversations) {
-      print(
-        '${conversation.conversationId} - '
-        '${conversation.otherUserName}',
-      );
-    }
-
-    // ------------------------------------------------------------
-    // READ MESSAGES
-    // ------------------------------------------------------------
-
-    final messages =
-        await database.select(database.messages).get();
-
-    print('Messages in database:');
-
-    for (final message in messages) {
-      print(
-        '${message.messageId} - ${message.content}',
-      );
-    }
-  } finally {
-    await database.close();
+  if (message == null) {
+    print('❌ FAILED: Message not found');
+    return;
   }
+
+  print('Message ID: ${message.messageId}');
+  print('Conversation ID: ${message.conversationId}');
+  print('Sender ID: ${message.senderId}');
+  print('Receiver ID: ${message.receiverId}');
+  print('Content: ${message.content}');
+  print('isMe: ${message.isMe}');
+
+  // -----------------------------------------
+  // TEST 3: Verify values
+  // -----------------------------------------
+
+  final valuesCorrect =
+      message.messageId == 'test-message-001' &&
+      message.conversationId == 'conversation-001' &&
+      message.senderId == 'user-001' &&
+      message.receiverId == 'user-002' &&
+      message.content == 'Hello from Taha!' &&
+      message.isMe == true;
+
+  if (valuesCorrect) {
+    print('✅ INSERT + READ PASSED');
+  } else {
+    print('❌ INSERT + READ FAILED');
+  }
+
+  // -----------------------------------------
+  // TEST 4: Insert received message
+  // -----------------------------------------
+
+  await db.messagesDao.insertMessage(
+    MessagesCompanion.insert(
+      messageId: 'test-message-002',
+      conversationId: 'conversation-001',
+      senderId: 'user-002',
+      receiverId: 'user-001',
+      content: 'Hi Taha!',
+      isMe: const Value(false),
+      sentAt: DateTime.now(),
+    ),
+  );
+
+  // -----------------------------------------
+  // TEST 5: Get conversation messages
+  // -----------------------------------------
+
+  final messages =
+      await db.messagesDao.getMessagesForConversation(
+    'conversation-001',
+  );
+
+  print('Messages in conversation: ${messages.length}');
+
+  for (final msg in messages) {
+    print(
+      '${msg.isMe ? "ME" : "THEM"}: ${msg.content}',
+    );
+  }
+
+  if (messages.length == 2) {
+    print('✅ CONVERSATION QUERY PASSED');
+  } else {
+    print('❌ CONVERSATION QUERY FAILED');
+  }
+
+  // -----------------------------------------
+  // TEST 6: Latest message
+  // -----------------------------------------
+
+  final latest =
+      await db.messagesDao.getLatestMessage(
+    'conversation-001',
+  );
+
+  if (latest != null) {
+    print('Latest message: ${latest.content}');
+    print('✅ LATEST MESSAGE QUERY PASSED');
+  } else {
+    print('❌ LATEST MESSAGE QUERY FAILED');
+  }
+
+  print('========== TEST COMPLETE ==========');
 }
