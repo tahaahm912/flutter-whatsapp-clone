@@ -193,53 +193,40 @@ final GoRouter appRouter = GoRouter(
       path: '/chat',
       builder: (context, state) {
         final extra = state.extra;
-
-        // HomeScreen/contact list must provide chat information.
+    
         if (extra is! Map<String, dynamic>) {
           return const Scaffold(
             body: Center(
-              child: Text(
-                'Invalid chat arguments',
-              ),
+              child: Text('Invalid chat arguments'),
             ),
           );
         }
-
-        // ---------------------------------------------------------------------
-        // NAME
-        // ---------------------------------------------------------------------
-
+    
+        final conversationIdValue = extra['conversationId'];
         final nameValue = extra['name'];
-
+        final avatarValue = extra['avatar'];
+    
+        final conversationId =
+            conversationIdValue is String ? conversationIdValue : '';
+    
         final name = nameValue is String &&
                 nameValue.trim().isNotEmpty
             ? nameValue
             : 'Unknown user';
-
-        // ---------------------------------------------------------------------
-        // AVATAR
-        // ---------------------------------------------------------------------
-
-        final avatarValue = extra['avatar'];
-
-        final avatar = avatarValue is String
-            ? avatarValue
-            : '';
-
-        // ---------------------------------------------------------------------
-        // OPEN CHAT
-        // ---------------------------------------------------------------------
-        //
-        // IMPORTANT:
-        // ChatScreen currently accepts ONLY:
-        //
-        //   name
-        //   avatar
-        //
-        // It does NOT accept conversationId or otherUserId.
-        //
-
+    
+        final avatar =
+            avatarValue is String ? avatarValue : '';
+    
+        if (conversationId.isEmpty) {
+          return const Scaffold(
+            body: Center(
+              child: Text('Invalid conversation ID'),
+            ),
+          );
+        }
+    
         return ChatScreen(
+          conversationId: conversationId,
           name: name,
           avatar: avatar,
         );

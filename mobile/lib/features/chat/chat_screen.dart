@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/network/api_client.dart';
+import '../../core/database/app_database.dart';
+import '../../features/chat/data/repositories/message_repository.dart';
 
 class ChatScreen extends StatefulWidget {
+  final String conversationId;
   final String name;
   final String avatar;
 
   const ChatScreen({
     super.key,
+    required this.conversationId,
     required this.name,
     required this.avatar,
   });
@@ -23,94 +28,202 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController =
       ScrollController();
 
-  // Temporary local messages.
-  //
-  // This is only for testing the chat UI.
-  // It does not communicate with the backend yet.
-  final List<ChatMessage> _messages = [];
+  late final AppDatabase _database;
+  late final ApiClient _apiClient;
+  late final MessageRepository _messageRepository;
+
+  List<Message> _messages = [];
+
+  bool _loading = true;
+  bool _sending = false;
+
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _database = AppDatabase();
+    _apiClient = ApiClient();
+
+    _messageRepository = MessageRepository(
+      apiClient: _apiClient,
+      database: _database,
+    );
+
+    _loadMessages();
+  }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _database.close();
+
     super.dispose();
+  }
+
+  // ============================================================
+  // LOAD MESSAGES
+  // ============================================================
+
+  Future<void> _loadMessages() async {
+    try {
+      final messages =
+          await _messageRepository.getMessages(
+        widget.conversationId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages = messages;
+        _loading = false;
+        _error = null;
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loading = false;
+        _error = 'Failed to load messages';
+      });
+
+      debugPrint(
+        'LOAD MESSAGES ERROR: $e',
+      );
+    }
   }
 
   // ============================================================
   // SEND MESSAGE
   // ============================================================
 
-  void _sendMessage() {
-    final text = _messageController.text.trim();
+  Future<void> _sendMessage() async {
+    final text =
+        _messageController.text.trim();
 
-    if (text.isEmpty) {
+    if (text.isEmpty || _sending) {
       return;
     }
 
     setState(() {
-      _messages.add(
-        ChatMessage(
-          text: text,
-          isMe: true,
-          time: _currentTime(),
-        ),
-      );
+      _sending = true;
     });
 
-    _messageController.clear();
+    try {
+      final message =
+          await _messageRepository.sendMessage(
+        conversationId:
+            widget.conversationId,
+        text: text,
+      );
 
-    _scrollToBottom();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _messages = [
+          ..._messages,
+          message,
+        ];
+
+        _sending = false;
+      });
+
+      _messageController.clear();
+
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _sending = false;
+      });
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Failed to send message',
+          ),
+        ),
+      );
+
+      debugPrint(
+        'SEND MESSAGE ERROR: $e',
+      );
+    }
   }
 
   // ============================================================
-  // SCROLL TO BOTTOM
+  // SCROLL
   // ============================================================
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) {
       if (!_scrollController.hasClients) {
         return;
       }
 
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
+        _scrollController
+            .position
+            .maxScrollExtent,
+        duration:
+            const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
     });
   }
 
   // ============================================================
-  // CURRENT TIME
+  // TIME
   // ============================================================
 
-  String _currentTime() {
-    final now = DateTime.now();
-
-    final hour = now.hour > 12
-        ? now.hour - 12
-        : now.hour == 0
+  String _formatTime(DateTime dateTime) {
+    final hour = dateTime.hour > 12
+        ? dateTime.hour - 12
+        : dateTime.hour == 0
             ? 12
-            : now.hour;
+            : dateTime.hour;
 
-    final minute = now.minute.toString().padLeft(2, '0');
+    final minute =
+        dateTime.minute.toString().padLeft(2, '0');
 
-    final period = now.hour >= 12 ? 'PM' : 'AM';
+    final period =
+        dateTime.hour >= 12 ? 'PM' : 'AM';
 
     return '$hour:$minute $period';
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor:
+          AppColors.background,
 
       // ========================================================
       // APP BAR
       // ========================================================
 
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor:
+            AppColors.surface,
         elevation: 0,
 
         leading: IconButton(
@@ -133,16 +246,20 @@ class _ChatScreenState extends State<ChatScreen> {
 
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
                 children: [
                   Text(
                     widget.name,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow:
+                        TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: AppColors.textPrimary,
+                      color:
+                          AppColors.textPrimary,
                       fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                      fontWeight:
+                          FontWeight.w700,
                     ),
                   ),
 
@@ -166,7 +283,8 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.videocam_outlined,
-              color: AppColors.textPrimary,
+              color:
+                  AppColors.textPrimary,
             ),
           ),
 
@@ -174,7 +292,8 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.call_outlined,
-              color: AppColors.textPrimary,
+              color:
+                  AppColors.textPrimary,
             ),
           ),
 
@@ -182,7 +301,8 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.more_vert,
-              color: AppColors.textPrimary,
+              color:
+                  AppColors.textPrimary,
             ),
           ),
         ],
@@ -205,19 +325,65 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ============================================================
-  // MESSAGES
+  // MESSAGE LIST
   // ============================================================
 
   Widget _buildMessages() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_error != null &&
+        _messages.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize:
+              MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              size: 42,
+              color:
+                  AppColors.textSecondary,
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              _error!,
+              style:
+                  const TextStyle(
+                color:
+                    AppColors.textSecondary,
+                fontSize: 14,
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            ElevatedButton(
+              onPressed: _loadMessages,
+              child:
+                  const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_messages.isEmpty) {
       return const Center(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize:
+              MainAxisSize.min,
           children: [
             Icon(
               Icons.chat_bubble_outline,
               size: 42,
-              color: AppColors.textSecondary,
+              color:
+                  AppColors.textSecondary,
             ),
 
             SizedBox(height: 10),
@@ -225,7 +391,8 @@ class _ChatScreenState extends State<ChatScreen> {
             Text(
               'No messages yet',
               style: TextStyle(
-                color: AppColors.textSecondary,
+                color:
+                    AppColors.textSecondary,
                 fontSize: 14,
               ),
             ),
@@ -235,18 +402,28 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.fromLTRB(
+      controller:
+          _scrollController,
+
+      padding:
+          const EdgeInsets.fromLTRB(
         16,
         16,
         16,
         12,
       ),
-      itemCount: _messages.length,
-      itemBuilder: (context, index) {
-        final message = _messages[index];
 
-        return _buildMessageBubble(message);
+      itemCount:
+          _messages.length,
+
+      itemBuilder:
+          (context, index) {
+        final message =
+            _messages[index];
+
+        return _buildMessageBubble(
+          message,
+        );
       },
     );
   }
@@ -255,77 +432,100 @@ class _ChatScreenState extends State<ChatScreen> {
   // MESSAGE BUBBLE
   // ============================================================
 
-  Widget _buildMessageBubble(ChatMessage message) {
+  Widget _buildMessageBubble(
+    Message message,
+  ) {
     return Align(
       alignment: message.isMe
           ? Alignment.centerRight
           : Alignment.centerLeft,
 
       child: Container(
-        constraints: const BoxConstraints(
+        constraints:
+            const BoxConstraints(
           maxWidth: 290,
         ),
 
-        margin: const EdgeInsets.only(
+        margin:
+            const EdgeInsets.only(
           bottom: 8,
         ),
 
-        padding: const EdgeInsets.fromLTRB(
+        padding:
+            const EdgeInsets.fromLTRB(
           14,
           9,
           10,
           7,
         ),
 
-        decoration: BoxDecoration(
+        decoration:
+            BoxDecoration(
           color: message.isMe
               ? AppColors.primary
               : AppColors.surface,
 
-          borderRadius: BorderRadius.circular(16),
+          borderRadius:
+              BorderRadius.circular(
+            16,
+          ),
 
           border: message.isMe
               ? null
               : Border.all(
-                  color: AppColors.textSecondary.withValues(
+                  color: AppColors
+                      .textSecondary
+                      .withValues(
                     alpha: 0.12,
                   ),
                 ),
         ),
 
         child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize:
+              MainAxisSize.min,
+
+          crossAxisAlignment:
+              CrossAxisAlignment.end,
 
           children: [
             Flexible(
               child: Text(
-                message.text,
+                message.content,
                 style: TextStyle(
                   color: message.isMe
                       ? AppColors.surface
-                      : AppColors.textPrimary,
+                      : AppColors
+                          .textPrimary,
                   fontSize: 15,
                 ),
               ),
             ),
 
-            const SizedBox(width: 8),
+            const SizedBox(
+              width: 8,
+            ),
 
             Text(
-              message.time,
+              _formatTime(
+                message.sentAt,
+              ),
               style: TextStyle(
                 color: message.isMe
-                    ? AppColors.surface.withValues(
+                    ? AppColors.surface
+                        .withValues(
                         alpha: 0.75,
                       )
-                    : AppColors.textSecondary,
+                    : AppColors
+                        .textSecondary,
                 fontSize: 10,
               ),
             ),
 
             if (message.isMe) ...[
-              const SizedBox(width: 3),
+              const SizedBox(
+                width: 3,
+              ),
 
               const Icon(
                 Icons.done_all,
@@ -340,7 +540,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ============================================================
-  // MESSAGE INPUT
+  // INPUT
   // ============================================================
 
   Widget _buildMessageInput() {
@@ -348,7 +548,8 @@ class _ChatScreenState extends State<ChatScreen> {
       top: false,
 
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
+        padding:
+            const EdgeInsets.fromLTRB(
           10,
           6,
           10,
@@ -359,19 +560,25 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Expanded(
               child: Container(
-                constraints: const BoxConstraints(
+                constraints:
+                    const BoxConstraints(
                   minHeight: 46,
                 ),
 
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
+                decoration:
+                    BoxDecoration(
+                  color:
+                      AppColors.surface,
 
-                  borderRadius: BorderRadius.circular(
+                  borderRadius:
+                      BorderRadius.circular(
                     24,
                   ),
 
                   border: Border.all(
-                    color: AppColors.textSecondary.withValues(
+                    color: AppColors
+                        .textSecondary
+                        .withValues(
                       alpha: 0.10,
                     ),
                   ),
@@ -381,43 +588,56 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     IconButton(
                       onPressed: () {},
-                      icon: const Icon(
+                      icon:
+                          const Icon(
                         Icons.add,
-                        color: AppColors.textSecondary,
+                        color: AppColors
+                            .textSecondary,
                       ),
                     ),
 
                     Expanded(
                       child: TextField(
-                        controller: _messageController,
+                        controller:
+                            _messageController,
 
                         textCapitalization:
-                            TextCapitalization.sentences,
+                            TextCapitalization
+                                .sentences,
 
                         minLines: 1,
                         maxLines: 4,
 
-                        onSubmitted: (_) {
+                        onSubmitted:
+                            (_) {
                           _sendMessage();
                         },
 
-                        decoration: const InputDecoration(
-                          hintText: 'Message',
+                        decoration:
+                            const InputDecoration(
+                          hintText:
+                              'Message',
 
-                          hintStyle: TextStyle(
-                            color: AppColors.textSecondary,
+                          hintStyle:
+                              TextStyle(
+                            color: AppColors
+                                .textSecondary,
                           ),
 
-                          border: InputBorder.none,
+                          border:
+                              InputBorder.none,
                         ),
                       ),
                     ),
 
                     IconButton(
                       onPressed: () {},
-                      icon: const Icon(
-                        Icons.emoji_emotions_outlined,
-                        color: AppColors.textSecondary,
+                      icon:
+                          const Icon(
+                        Icons
+                            .emoji_emotions_outlined,
+                        color: AppColors
+                            .textSecondary,
                       ),
                     ),
                   ],
@@ -425,25 +645,45 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
 
-            const SizedBox(width: 8),
+            const SizedBox(
+              width: 8,
+            ),
 
             GestureDetector(
-              onTap: _sendMessage,
+              onTap: _sending
+                  ? null
+                  : _sendMessage,
 
               child: Container(
                 width: 46,
                 height: 46,
 
-                decoration: const BoxDecoration(
-                  color: AppColors.primary,
-                  shape: BoxShape.circle,
+                decoration:
+                    const BoxDecoration(
+                  color:
+                      AppColors.primary,
+                  shape:
+                      BoxShape.circle,
                 ),
 
-                child: const Icon(
-                  Icons.send_rounded,
-                  color: AppColors.surface,
-                  size: 21,
-                ),
+                child: _sending
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child:
+                            CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color:
+                              AppColors.surface,
+                        ),
+                      )
+                    : const Icon(
+                        Icons
+                            .send_rounded,
+                        color:
+                            AppColors.surface,
+                        size: 21,
+                      ),
               ),
             ),
           ],
@@ -461,10 +701,11 @@ class _ChatScreenState extends State<ChatScreen> {
       width: 40,
       height: 40,
 
-      decoration: BoxDecoration(
+      decoration:
+          BoxDecoration(
         shape: BoxShape.circle,
-
-        color: AppColors.primary.withValues(
+        color: AppColors.primary
+            .withValues(
           alpha: 0.10,
         ),
       ),
@@ -482,13 +723,17 @@ class _ChatScreenState extends State<ChatScreen> {
             return Center(
               child: Text(
                 widget.name.isNotEmpty
-                    ? widget.name[0].toUpperCase()
+                    ? widget.name[0]
+                        .toUpperCase()
                     : '?',
 
-                style: const TextStyle(
-                  color: AppColors.primary,
+                style:
+                    const TextStyle(
+                  color:
+                      AppColors.primary,
                   fontSize: 17,
-                  fontWeight: FontWeight.w700,
+                  fontWeight:
+                      FontWeight.w700,
                 ),
               ),
             );
@@ -497,20 +742,4 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-}
-
-// ============================================================
-// CHAT MESSAGE MODEL
-// ============================================================
-
-class ChatMessage {
-  final String text;
-  final bool isMe;
-  final String time;
-
-  const ChatMessage({
-    required this.text,
-    required this.isMe,
-    required this.time,
-  });
 }

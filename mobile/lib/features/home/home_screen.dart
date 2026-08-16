@@ -260,13 +260,13 @@ class _HomeScreenState extends State<HomeScreen> {
           borderRadius: BorderRadius.circular(6),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
           ],
           border: Border.all(
-            color: AppColors.textSecondary.withOpacity(0.15),
+            color: AppColors.textSecondary.withValues(alpha: 0.15),
           ),
         ),
         child: const TextField(
@@ -332,14 +332,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   decoration: BoxDecoration(
                     color: selected
-                        ? AppColors.primary.withOpacity(0.12)
+                        ? AppColors.primary.withValues(alpha: 0.12)
                         : AppColors.surface,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: selected
-                          ? AppColors.primary.withOpacity(0.25)
+                          ? AppColors.primary.withValues(alpha: 0.25)
                           : AppColors.textSecondary
-                              .withOpacity(0.15),
+                              .withValues(alpha: 0.15),
                     ),
                   ),
                   child: Text(
@@ -440,7 +440,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Divider(
             height: 1,
             thickness: 0.7,
-            color: AppColors.textSecondary.withOpacity(0.15),
+            color: AppColors.textSecondary.withValues(alpha: 0.15),
           ),
         );
       },
@@ -471,9 +471,9 @@ class _HomeScreenState extends State<HomeScreen> {
         context.push(
           '/chat',
           extra: {
+            'conversationId': conversation.conversationId,
             'name': conversation.name,
             'avatar': conversation.avatar,
-            'conversationId': conversation.conversationId,
           },
         );
       },
@@ -686,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary.withOpacity(0.10),
+        color: AppColors.primary.withValues(alpha: 0.10),
       ),
 
       child: ClipOval(
@@ -700,7 +700,7 @@ class _HomeScreenState extends State<HomeScreen> {
             stackTrace,
           ) {
             return Container(
-              color: AppColors.primary.withOpacity(0.10),
+              color: AppColors.primary.withValues(alpha: 0.10),
 
               alignment: Alignment.center,
 
@@ -733,7 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         border: Border(
           top: BorderSide(
-            color: AppColors.textSecondary.withOpacity(0.15),
+            color: AppColors.textSecondary.withValues(alpha: 0.15),
             width: 0.7,
           ),
         ),
@@ -869,7 +869,7 @@ class _HomeScreenState extends State<HomeScreen> {
           shape: BoxShape.circle,
 
           border: Border.all(
-            color: AppColors.textSecondary.withOpacity(0.15),
+            color: AppColors.textSecondary.withValues(alpha: 0.15),
           ),
         ),
 
