@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/database/app_database.dart' as database;
+import '../chat/data/repositories/conversation_repository.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,65 +23,109 @@ class _HomeScreenState extends State<HomeScreen> {
     'Favorites',
   ];
 
-  // --------------------------------------------------------------------------
-  // TEMPORARY CONVERSATION DATA
-  //
-  // This is only UI/demo data.
-  // Later this will come from the backend/database/WebSocket.
-  // --------------------------------------------------------------------------
+  final database.AppDatabase _database = database.AppDatabase();
+  late final ConversationRepository _conversationRepository;
 
-  final List<Conversation> _conversations = [
-    Conversation(
-      name: 'Jabir Khan',
-      message: 'Bro, are you free this evening?',
-      time: '9:40 AM',
-      avatar: 'assets/images/avatar1.jpg',
-      unreadCount: 0,
-      isPinned: true,
-      isTyping: true,
-      isFavorite: true,
-    ),
-    Conversation(
-      name: 'Developers',
-      message: 'Ali: Pushed the latest changes...',
-      time: '9:32 AM',
-      avatar: 'assets/images/avatar2.jpg',
-      unreadCount: 2,
-      isGroup: true,
-    ),
-    Conversation(
-      name: 'Usama Ahmed',
-      message: 'Can you review this PR?',
-      time: '9:15 AM',
-      avatar: 'assets/images/avatar3.jpg',
-      unreadCount: 0,
-      reply: 'Sure, sending in a bit.',
-    ),
-    Conversation(
-      name: 'Project Phoenix',
-      message: "Sara: Let's sync up at 5 PM.",
-      time: '8:45 AM',
-      avatar: 'assets/images/avatar4.jpg',
-      unreadCount: 0,
-      isMuted: true,
-    ),
-    Conversation(
-      name: 'Hassan Ali',
-      message: 'Thanks for the help!',
-      time: 'Yesterday',
-      avatar: 'assets/images/avatar3.jpg',
-      unreadCount: 0,
-      reply: "You're welcome! 😊",
-    ),
-    Conversation(
-      name: 'Family Group ❤️',
-      message: "Abby: Don't forget dinner at 8...",
-      time: 'Yesterday',
-      avatar: 'assets/images/avatar5.jpg',
-      unreadCount: 0,
-      isGroup: true,
-    ),
-  ];
+  List<Conversation> _conversations = [];
+  bool _isLoadingConversations = true;
+  String? _conversationError;
+
+  @override
+  void initState() {
+    super.initState();
+    _conversationRepository = ConversationRepository(database: _database);
+    _loadConversations();
+  }
+
+  @override
+  void dispose() {
+    _conversationRepository.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadConversations() async {
+    setState(() {
+      _isLoadingConversations = true;
+      _conversationError = null;
+    });
+
+    try {
+      final cached = await _conversationRepository.getCachedConversations();
+      if (mounted && cached.isNotEmpty) {
+        setState(() {
+          _conversations = cached.map(_toUiConversation).toList();
+        });
+      }
+
+      final conversations = await _conversationRepository.syncConversations();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _conversations = conversations.map(_toUiConversation).toList();
+        _isLoadingConversations = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final cached = await _conversationRepository.getCachedConversations();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _conversations = cached.map(_toUiConversation).toList();
+        _isLoadingConversations = false;
+        _conversationError = cached.isEmpty
+            ? 'Unable to load conversations'
+            : null;
+      });
+    }
+  }
+
+  Conversation _toUiConversation(
+    database.Conversation conversation,
+  ) {
+    return Conversation(
+      conversationId: conversation.conversationId,
+      otherUserId: conversation.otherUserId,
+      name: conversation.otherUserName,
+      message: conversation.lastMessage ?? 'No messages yet',
+      time: _formatConversationTime(
+        conversation.lastMessageAt ?? conversation.updatedAt,
+      ),
+      avatar: conversation.otherUserAvatar ?? '',
+      unreadCount: conversation.unreadCount,
+    );
+  }
+
+  String _formatConversationTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final local = dateTime.toLocal();
+
+    if (now.year == local.year &&
+        now.month == local.month &&
+        now.day == local.day) {
+      final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+      final minute = local.minute.toString().padLeft(2, '0');
+      final period = local.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $period';
+    }
+
+    final yesterday = now.subtract(const Duration(days: 1));
+    if (yesterday.year == local.year &&
+        yesterday.month == local.month &&
+        yesterday.day == local.day) {
+      return 'Yesterday';
+    }
+
+    return '${local.day}/${local.month}/${local.year}';
+  }
 
   // --------------------------------------------------------------------------
   // FILTERED CONVERSATIONS
@@ -326,20 +372,59 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildConversationList() {
     final conversations = filteredConversations;
 
-    if (conversations.isEmpty) {
+    if (_isLoadingConversations && conversations.isEmpty) {
       return const Center(
-        child: Text(
-          'No conversations',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 15,
-          ),
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_conversationError != null && conversations.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Unable to load conversations',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: _loadConversations,
+              child: const Text('Retry'),
+            ),
+          ],
         ),
       );
     }
 
-    return ListView.separated(
-      physics: const BouncingScrollPhysics(),
+    if (conversations.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _loadConversations,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 180),
+            Center(
+              child: Text(
+                'No conversations',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadConversations,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
 
       padding: const EdgeInsets.only(
         top: 4,
@@ -365,6 +450,7 @@ class _HomeScreenState extends State<HomeScreen> {
           conversations[index],
         );
       },
+      ),
     );
   }
 
@@ -387,6 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
           extra: {
             'name': conversation.name,
             'avatar': conversation.avatar,
+            'conversationId': conversation.conversationId,
           },
         );
       },
@@ -817,6 +904,8 @@ class _HomeScreenState extends State<HomeScreen> {
 // =============================================================================
 
 class Conversation {
+  final String conversationId;
+  final String otherUserId;
   final String name;
   final String message;
   final String time;
@@ -833,6 +922,8 @@ class Conversation {
   final String? reply;
 
   Conversation({
+    required this.conversationId,
+    required this.otherUserId,
     required this.name,
     required this.message,
     required this.time,

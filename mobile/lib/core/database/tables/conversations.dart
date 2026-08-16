@@ -3,30 +3,37 @@ import 'package:drift/drift.dart';
 class Conversations extends Table {
   IntColumn get id => integer().autoIncrement()();
 
-  TextColumn get conversationId =>
-      text().unique()();
+  /// Backend conversation UUID/ID.
+  TextColumn get conversationId => text().unique()();
 
-  TextColumn get otherUserId =>
-      text()();
+  /// The other user's ID in a direct conversation.
+  TextColumn get otherUserId => text()();
 
-  TextColumn get otherUserName =>
-      text()();
+  /// Name displayed in the conversation list.
+  TextColumn get otherUserName => text()();
 
-  TextColumn get otherUserAvatar =>
-      text().nullable()();
+  /// Optional profile image URL.
+  TextColumn get otherUserAvatar => text().nullable()();
 
-  TextColumn get lastMessage =>
-      text().nullable()();
+  /// Last cached message preview.
+  TextColumn get lastMessage => text().nullable()();
 
-  DateTimeColumn get lastMessageAt =>
-      dateTime().nullable()();
+  /// Time of the last cached message.
+  DateTimeColumn get lastMessageAt => dateTime().nullable()();
 
+  /// Number of unread messages.
   IntColumn get unreadCount =>
-      integer().withDefault(const Constant(0))();
+      integer().withDefault(
+        const Constant(0),
+      )();
 
   DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
+      dateTime().withDefault(
+        currentDateAndTime,
+      )();
 
   DateTimeColumn get updatedAt =>
-      dateTime().withDefault(currentDateAndTime)();
+      dateTime().withDefault(
+        currentDateAndTime,
+      )();
 }

@@ -8,59 +8,127 @@ part 'conversations_dao.g.dart';
 @DriftAccessor(tables: [Conversations])
 class ConversationDao extends DatabaseAccessor<AppDatabase>
     with _$ConversationDaoMixin {
-  ConversationDao(super.db);
+  ConversationDao(AppDatabase db) : super(db);
+
+  // ---------------------------------------------------------------------------
+  // GET ALL CONVERSATIONS
+  // ---------------------------------------------------------------------------
 
   Future<List<Conversation>> getAllConversations() {
     return (select(conversations)
           ..orderBy([
-            (c) => OrderingTerm(
-                  expression: c.updatedAt,
+            (conversation) => OrderingTerm(
+                  expression: conversation.updatedAt,
                   mode: OrderingMode.desc,
                 ),
           ]))
         .get();
   }
 
+  // ---------------------------------------------------------------------------
+  // GET ONE CONVERSATION
+  // ---------------------------------------------------------------------------
+
   Future<Conversation?> getConversationById(
     String conversationId,
   ) {
     return (select(conversations)
           ..where(
-            (c) => c.conversationId.equals(conversationId),
+            (conversation) =>
+                conversation.conversationId.equals(conversationId),
           ))
         .getSingleOrNull();
   }
 
-  Future<int> insertConversation(
-    ConversationsCompanion conversation,
-  ) {
-    return into(conversations).insert(conversation);
-  }
+  // ---------------------------------------------------------------------------
+  // INSERT / UPDATE
+  // ---------------------------------------------------------------------------
 
   Future<void> upsertConversation(
     ConversationsCompanion conversation,
   ) async {
-    await into(conversations).insertOnConflictUpdate(conversation);
+    await into(conversations).insertOnConflictUpdate(
+      conversation,
+    );
   }
 
-  Future<bool> updateConversation(
-    ConversationsCompanion conversation,
-  ) async {
-    final count = await update(conversations).write(conversation);
-    return count > 0;
+  // ---------------------------------------------------------------------------
+  // DELETE ALL
+  // ---------------------------------------------------------------------------
+
+  Future<void> clearConversations() async {
+    await delete(conversations).go();
   }
 
-  Future<int> deleteConversation(
+  // ---------------------------------------------------------------------------
+  // DELETE ONE
+  // ---------------------------------------------------------------------------
+
+  Future<void> deleteConversation(
     String conversationId,
-  ) {
-    return (delete(conversations)
+  ) async {
+    await (delete(conversations)
           ..where(
-            (c) => c.conversationId.equals(conversationId),
+            (conversation) =>
+                conversation.conversationId.equals(conversationId),
           ))
         .go();
   }
 
-  Future<void> clearConversations() async {
-    await delete(conversations).go();
+  // ---------------------------------------------------------------------------
+  // UPDATE MESSAGE PREVIEW
+  // ---------------------------------------------------------------------------
+
+  Future<void> updateLastMessage({
+    required String conversationId,
+    required String message,
+    required DateTime messageTime,
+  }) async {
+    await (update(conversations)
+          ..where(
+            (conversation) =>
+                conversation.conversationId.equals(conversationId),
+          ))
+        .write(
+      ConversationsCompanion(
+        lastMessage: Value(message),
+        lastMessageAt: Value(messageTime),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // UPDATE UNREAD COUNT
+  // ---------------------------------------------------------------------------
+
+  Future<void> updateUnreadCount({
+    required String conversationId,
+    required int unreadCount,
+  }) async {
+    await (update(conversations)
+          ..where(
+            (conversation) =>
+                conversation.conversationId.equals(conversationId),
+          ))
+        .write(
+      ConversationsCompanion(
+        unreadCount: Value(unreadCount),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // CLEAR UNREAD
+  // ---------------------------------------------------------------------------
+
+  Future<void> clearUnread(
+    String conversationId,
+  ) async {
+    await updateUnreadCount(
+      conversationId: conversationId,
+      unreadCount: 0,
+    );
   }
 }

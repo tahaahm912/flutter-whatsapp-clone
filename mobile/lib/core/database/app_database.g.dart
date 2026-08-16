@@ -833,12 +833,26 @@ class $ConversationsTable extends Conversations
 
 class Conversation extends DataClass implements Insertable<Conversation> {
   final int id;
+
+  /// Backend conversation UUID/ID.
   final String conversationId;
+
+  /// The other user's ID in a direct conversation.
   final String otherUserId;
+
+  /// Name displayed in the conversation list.
   final String otherUserName;
+
+  /// Optional profile image URL.
   final String? otherUserAvatar;
+
+  /// Last cached message preview.
   final String? lastMessage;
+
+  /// Time of the last cached message.
   final DateTime? lastMessageAt;
+
+  /// Number of unread messages.
   final int unreadCount;
   final DateTime createdAt;
   final DateTime updatedAt;

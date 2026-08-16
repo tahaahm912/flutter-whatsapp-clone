@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../app/theme/app_colors.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -22,17 +23,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController =
       ScrollController();
 
-  // ============================================================
-  // TEMPORARY LOCAL MESSAGE STATE
-  // ============================================================
+  // Temporary local messages.
   //
-  // This is intentionally EMPTY.
-  //
-  // Do NOT add fake messages here.
-  //
-  // Later this list will be populated by your actual
-  // backend/WebSocket messaging system.
-  //
+  // This is only for testing the chat UI.
+  // It does not communicate with the backend yet.
   final List<ChatMessage> _messages = [];
 
   @override
@@ -53,15 +47,6 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // ----------------------------------------------------------
-    // TEMPORARY LOCAL UI TEST
-    // ----------------------------------------------------------
-    //
-    // This does NOT send the message to the backend.
-    //
-    // It only lets you test the chat UI while the real messaging
-    // system is not implemented yet.
-    //
     setState(() {
       _messages.add(
         ChatMessage(
@@ -89,9 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(
-          milliseconds: 250,
-        ),
+        duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
     });
@@ -110,10 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ? 12
             : now.hour;
 
-    final minute = now.minute.toString().padLeft(
-          2,
-          '0',
-        );
+    final minute = now.minute.toString().padLeft(2, '0');
 
     final period = now.hour >= 12 ? 'PM' : 'AM';
 
@@ -126,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen> {
       backgroundColor: AppColors.background,
 
       // ========================================================
-      // CHAT APP BAR
+      // APP BAR
       // ========================================================
 
       appBar: AppBar(
@@ -209,7 +189,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
 
       // ========================================================
-      // CHAT BODY
+      // BODY
       // ========================================================
 
       body: Column(
@@ -256,16 +236,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return ListView.builder(
       controller: _scrollController,
-
       padding: const EdgeInsets.fromLTRB(
         16,
         16,
         16,
         12,
       ),
-
       itemCount: _messages.length,
-
       itemBuilder: (context, index) {
         final message = _messages[index];
 
@@ -278,9 +255,7 @@ class _ChatScreenState extends State<ChatScreen> {
   // MESSAGE BUBBLE
   // ============================================================
 
-  Widget _buildMessageBubble(
-    ChatMessage message,
-  ) {
+  Widget _buildMessageBubble(ChatMessage message) {
     return Align(
       alignment: message.isMe
           ? Alignment.centerRight
@@ -307,15 +282,14 @@ class _ChatScreenState extends State<ChatScreen> {
               ? AppColors.primary
               : AppColors.surface,
 
-          borderRadius: BorderRadius.circular(
-            16,
-          ),
+          borderRadius: BorderRadius.circular(16),
 
           border: message.isMe
               ? null
               : Border.all(
-                  color: AppColors.textSecondary
-                      .withOpacity(0.12),
+                  color: AppColors.textSecondary.withValues(
+                    alpha: 0.12,
+                  ),
                 ),
         ),
 
@@ -327,12 +301,10 @@ class _ChatScreenState extends State<ChatScreen> {
             Flexible(
               child: Text(
                 message.text,
-
                 style: TextStyle(
                   color: message.isMe
                       ? AppColors.surface
                       : AppColors.textPrimary,
-
                   fontSize: 15,
                 ),
               ),
@@ -342,12 +314,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
             Text(
               message.time,
-
               style: TextStyle(
                 color: message.isMe
-                    ? AppColors.surface.withOpacity(0.75)
+                    ? AppColors.surface.withValues(
+                        alpha: 0.75,
+                      )
                     : AppColors.textSecondary,
-
                 fontSize: 10,
               ),
             ),
@@ -399,8 +371,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
 
                   border: Border.all(
-                    color: AppColors.textSecondary
-                        .withOpacity(0.15),
+                    color: AppColors.textSecondary.withValues(
+                      alpha: 0.10,
+                    ),
                   ),
                 ),
 
@@ -480,7 +453,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ============================================================
-  // CHAT AVATAR
+  // AVATAR
   // ============================================================
 
   Widget _buildAvatar() {
@@ -490,13 +463,15 @@ class _ChatScreenState extends State<ChatScreen> {
 
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary.withOpacity(0.10),
+
+        color: AppColors.primary.withValues(
+          alpha: 0.10,
+        ),
       ),
 
       child: ClipOval(
         child: Image.asset(
           widget.avatar,
-
           fit: BoxFit.cover,
 
           errorBuilder: (
@@ -533,7 +508,7 @@ class ChatMessage {
   final bool isMe;
   final String time;
 
-  ChatMessage({
+  const ChatMessage({
     required this.text,
     required this.isMe,
     required this.time,
