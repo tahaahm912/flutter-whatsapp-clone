@@ -54,6 +54,12 @@ Future<void> _login() async {
     await _storage.saveAccessToken(response.accessToken);
     await _storage.saveRefreshToken(response.refreshToken);
 
+    if (response.user.id.isEmpty) {
+      throw Exception('Login response did not contain a valid user ID');
+    }
+
+    await _storage.saveUserId(response.user.id);
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/network/api_client.dart';
 import '../../core/database/app_database.dart';
+import '../../core/storage/secure_storage.dart';
 import '../../features/chat/data/repositories/message_repository.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -36,8 +37,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _loading = true;
   bool _sending = false;
+  bool _repositoryInitialized = false;
 
   String? _error;
+  String? _currentUserId;
 
   @override
   void initState() {
@@ -46,12 +49,79 @@ class _ChatScreenState extends State<ChatScreen> {
     _database = AppDatabase();
     _apiClient = ApiClient();
 
-    _messageRepository = MessageRepository(
-      apiClient: _apiClient,
-      database: _database,
-    );
+    _initializeChat();
+  }
 
-    _loadMessages();
+  // ============================================================
+  // INITIALIZE CHAT
+  // ============================================================
+
+  Future<void> _initializeChat() async {
+    try {
+      final storage = SecureStorage();
+
+      final userId = await storage.getUserId();
+
+      // ----------------------------------------------------------
+      // Make sure a logged-in user ID exists.
+      // ----------------------------------------------------------
+
+      if (userId == null || userId.trim().isEmpty) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _loading = false;
+          _error = 'Unable to identify logged-in user';
+        });
+
+        debugPrint(
+          'CHAT ERROR: user_id not found in SecureStorage',
+        );
+
+        return;
+      }
+
+      _currentUserId = userId.trim();
+
+      debugPrint(
+        'CURRENT USER ID: $_currentUserId',
+      );
+
+      // ----------------------------------------------------------
+      // Create MessageRepository using the actual logged-in user.
+      // ----------------------------------------------------------
+
+      _messageRepository = MessageRepository(
+        apiClient: _apiClient,
+        database: _database,
+        currentUserId: _currentUserId!,
+      );
+
+      _repositoryInitialized = true;
+
+      // ----------------------------------------------------------
+      // Load messages after repository initialization.
+      // ----------------------------------------------------------
+
+      await _loadMessages();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      debugPrint('CHAT INITIALIZATION ERROR: $e');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loading = false;
+        _error = 'Failed to initialize chat: $e';
+      });
+    }
   }
 
   @override
@@ -68,6 +138,10 @@ class _ChatScreenState extends State<ChatScreen> {
   // ============================================================
 
   Future<void> _loadMessages() async {
+    if (!_repositoryInitialized) {
+      return;
+    }
+
     try {
       final messages =
           await _messageRepository.getMessages(
@@ -90,14 +164,16 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
 
+      debugPrint('LOAD MESSAGES ERROR: $e');
+
+      if (!mounted) {
+        return;
+      }
+      
       setState(() {
         _loading = false;
-        _error = 'Failed to load messages';
+        _error = 'Failed to load messages: $e';
       });
-
-      debugPrint(
-        'LOAD MESSAGES ERROR: $e',
-      );
     }
   }
 
@@ -106,10 +182,21 @@ class _ChatScreenState extends State<ChatScreen> {
   // ============================================================
 
   Future<void> _sendMessage() async {
-    final text =
-        _messageController.text.trim();
+    final text = _messageController.text.trim();
 
     if (text.isEmpty || _sending) {
+      return;
+    }
+
+    if (!_repositoryInitialized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Chat is still initializing',
+          ),
+        ),
+      );
+
       return;
     }
 
@@ -120,8 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final message =
           await _messageRepository.sendMessage(
-        conversationId:
-            widget.conversationId,
+        conversationId: widget.conversationId,
         text: text,
       );
 
@@ -150,8 +236,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _sending = false;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
             'Failed to send message',
@@ -170,18 +255,16 @@ class _ChatScreenState extends State<ChatScreen> {
   // ============================================================
 
   void _scrollToBottom() {
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) {
         return;
       }
 
       _scrollController.animateTo(
-        _scrollController
-            .position
-            .maxScrollExtent,
-        duration:
-            const Duration(milliseconds: 250),
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(
+          milliseconds: 250,
+        ),
         curve: Curves.easeOut,
       );
     });
@@ -214,16 +297,14 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          AppColors.background,
+      backgroundColor: AppColors.background,
 
       // ========================================================
       // APP BAR
       // ========================================================
 
       appBar: AppBar(
-        backgroundColor:
-            AppColors.surface,
+        backgroundColor: AppColors.surface,
         elevation: 0,
 
         leading: IconButton(
@@ -252,14 +333,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   Text(
                     widget.name,
                     maxLines: 1,
-                    overflow:
-                        TextOverflow.ellipsis,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color:
-                          AppColors.textPrimary,
+                      color: AppColors.textPrimary,
                       fontSize: 16,
-                      fontWeight:
-                          FontWeight.w700,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
 
@@ -283,8 +361,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.videocam_outlined,
-              color:
-                  AppColors.textPrimary,
+              color: AppColors.textPrimary,
             ),
           ),
 
@@ -292,8 +369,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.call_outlined,
-              color:
-                  AppColors.textPrimary,
+              color: AppColors.textPrimary,
             ),
           ),
 
@@ -301,8 +377,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {},
             icon: const Icon(
               Icons.more_vert,
-              color:
-                  AppColors.textPrimary,
+              color: AppColors.textPrimary,
             ),
           ),
         ],
@@ -335,28 +410,23 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
-    if (_error != null &&
-        _messages.isEmpty) {
+    if (_error != null && _messages.isEmpty) {
       return Center(
         child: Column(
-          mainAxisSize:
-              MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(
               Icons.error_outline,
               size: 42,
-              color:
-                  AppColors.textSecondary,
+              color: AppColors.textSecondary,
             ),
 
             const SizedBox(height: 10),
 
             Text(
               _error!,
-              style:
-                  const TextStyle(
-                color:
-                    AppColors.textSecondary,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
                 fontSize: 14,
               ),
             ),
@@ -364,9 +434,8 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(height: 12),
 
             ElevatedButton(
-              onPressed: _loadMessages,
-              child:
-                  const Text('Retry'),
+              onPressed: _initializeChat,
+              child: const Text('Retry'),
             ),
           ],
         ),
@@ -376,14 +445,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_messages.isEmpty) {
       return const Center(
         child: Column(
-          mainAxisSize:
-              MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.chat_bubble_outline,
               size: 42,
-              color:
-                  AppColors.textSecondary,
+              color: AppColors.textSecondary,
             ),
 
             SizedBox(height: 10),
@@ -391,8 +458,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Text(
               'No messages yet',
               style: TextStyle(
-                color:
-                    AppColors.textSecondary,
+                color: AppColors.textSecondary,
                 fontSize: 14,
               ),
             ),
@@ -402,28 +468,21 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     return ListView.builder(
-      controller:
-          _scrollController,
+      controller: _scrollController,
 
-      padding:
-          const EdgeInsets.fromLTRB(
+      padding: const EdgeInsets.fromLTRB(
         16,
         16,
         16,
         12,
       ),
 
-      itemCount:
-          _messages.length,
+      itemCount: _messages.length,
 
-      itemBuilder:
-          (context, index) {
-        final message =
-            _messages[index];
+      itemBuilder: (context, index) {
+        final message = _messages[index];
 
-        return _buildMessageBubble(
-          message,
-        );
+        return _buildMessageBubble(message);
       },
     );
   }
@@ -432,49 +491,47 @@ class _ChatScreenState extends State<ChatScreen> {
   // MESSAGE BUBBLE
   // ============================================================
 
-  Widget _buildMessageBubble(
-    Message message,
-  ) {
+  Widget _buildMessageBubble(Message message) {
+    debugPrint(
+  'UI MESSAGE => '
+  'content=${message.content} | '
+  'senderId=${message.senderId} | '
+  'isMe=${message.isMe}',
+);
     return Align(
       alignment: message.isMe
           ? Alignment.centerRight
           : Alignment.centerLeft,
 
       child: Container(
-        constraints:
-            const BoxConstraints(
+        constraints: const BoxConstraints(
           maxWidth: 290,
         ),
 
-        margin:
-            const EdgeInsets.only(
+        margin: const EdgeInsets.only(
           bottom: 8,
         ),
 
-        padding:
-            const EdgeInsets.fromLTRB(
+        padding: const EdgeInsets.fromLTRB(
           14,
           9,
           10,
           7,
         ),
 
-        decoration:
-            BoxDecoration(
+        decoration: BoxDecoration(
           color: message.isMe
               ? AppColors.primary
               : AppColors.surface,
 
-          borderRadius:
-              BorderRadius.circular(
+          borderRadius: BorderRadius.circular(
             16,
           ),
 
           border: message.isMe
               ? null
               : Border.all(
-                  color: AppColors
-                      .textSecondary
+                  color: AppColors.textSecondary
                       .withValues(
                     alpha: 0.12,
                   ),
@@ -482,8 +539,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
 
         child: Row(
-          mainAxisSize:
-              MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
 
           crossAxisAlignment:
               CrossAxisAlignment.end,
@@ -495,8 +551,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: TextStyle(
                   color: message.isMe
                       ? AppColors.surface
-                      : AppColors
-                          .textPrimary,
+                      : AppColors.textPrimary,
                   fontSize: 15,
                 ),
               ),
@@ -512,12 +567,10 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               style: TextStyle(
                 color: message.isMe
-                    ? AppColors.surface
-                        .withValues(
+                    ? AppColors.surface.withValues(
                         alpha: 0.75,
                       )
-                    : AppColors
-                        .textSecondary,
+                    : AppColors.textSecondary,
                 fontSize: 10,
               ),
             ),
@@ -548,8 +601,7 @@ class _ChatScreenState extends State<ChatScreen> {
       top: false,
 
       child: Padding(
-        padding:
-            const EdgeInsets.fromLTRB(
+        padding: const EdgeInsets.fromLTRB(
           10,
           6,
           10,
@@ -560,24 +612,18 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Expanded(
               child: Container(
-                constraints:
-                    const BoxConstraints(
+                constraints: const BoxConstraints(
                   minHeight: 46,
                 ),
 
-                decoration:
-                    BoxDecoration(
-                  color:
-                      AppColors.surface,
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
 
                   borderRadius:
-                      BorderRadius.circular(
-                    24,
-                  ),
+                      BorderRadius.circular(24),
 
                   border: Border.all(
-                    color: AppColors
-                        .textSecondary
+                    color: AppColors.textSecondary
                         .withValues(
                       alpha: 0.10,
                     ),
@@ -588,11 +634,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     IconButton(
                       onPressed: () {},
-                      icon:
-                          const Icon(
+                      icon: const Icon(
                         Icons.add,
-                        color: AppColors
-                            .textSecondary,
+                        color:
+                            AppColors.textSecondary,
                       ),
                     ),
 
@@ -602,26 +647,22 @@ class _ChatScreenState extends State<ChatScreen> {
                             _messageController,
 
                         textCapitalization:
-                            TextCapitalization
-                                .sentences,
+                            TextCapitalization.sentences,
 
                         minLines: 1,
                         maxLines: 4,
 
-                        onSubmitted:
-                            (_) {
+                        onSubmitted: (_) {
                           _sendMessage();
                         },
 
                         decoration:
                             const InputDecoration(
-                          hintText:
-                              'Message',
+                          hintText: 'Message',
 
-                          hintStyle:
-                              TextStyle(
-                            color: AppColors
-                                .textSecondary,
+                          hintStyle: TextStyle(
+                            color:
+                                AppColors.textSecondary,
                           ),
 
                           border:
@@ -632,12 +673,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
                     IconButton(
                       onPressed: () {},
-                      icon:
-                          const Icon(
+                      icon: const Icon(
                         Icons
                             .emoji_emotions_outlined,
-                        color: AppColors
-                            .textSecondary,
+                        color:
+                            AppColors.textSecondary,
                       ),
                     ),
                   ],
@@ -660,10 +700,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 decoration:
                     const BoxDecoration(
-                  color:
-                      AppColors.primary,
-                  shape:
-                      BoxShape.circle,
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
                 ),
 
                 child: _sending
@@ -678,8 +716,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       )
                     : const Icon(
-                        Icons
-                            .send_rounded,
+                        Icons.send_rounded,
                         color:
                             AppColors.surface,
                         size: 21,
@@ -701,11 +738,9 @@ class _ChatScreenState extends State<ChatScreen> {
       width: 40,
       height: 40,
 
-      decoration:
-          BoxDecoration(
+      decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: AppColors.primary
-            .withValues(
+        color: AppColors.primary.withValues(
           alpha: 0.10,
         ),
       ),
@@ -723,17 +758,13 @@ class _ChatScreenState extends State<ChatScreen> {
             return Center(
               child: Text(
                 widget.name.isNotEmpty
-                    ? widget.name[0]
-                        .toUpperCase()
+                    ? widget.name[0].toUpperCase()
                     : '?',
 
-                style:
-                    const TextStyle(
-                  color:
-                      AppColors.primary,
+                style: const TextStyle(
+                  color: AppColors.primary,
                   fontSize: 17,
-                  fontWeight:
-                      FontWeight.w700,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             );

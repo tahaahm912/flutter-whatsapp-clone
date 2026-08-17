@@ -76,7 +76,22 @@ class MessagesDao extends DatabaseAccessor<AppDatabase>
   Future<bool> updateMessage(
     MessagesCompanion message,
   ) async {
-    final count = await update(messages).write(message);
+    if (!message.messageId.present) {
+      throw ArgumentError(
+        'messageId is required when updating a message',
+      );
+    }
+  
+    final count = await (update(messages)
+          ..where(
+            (m) => m.messageId.equals(
+              message.messageId.value,
+            ),
+          ))
+        .write(
+      message,
+    );
+  
     return count > 0;
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/features/contacts/data/repositories/user_repository.dart';
+import 'package:mobile/features/chat/data/repositories/conversation_repository.dart';
 
 class NewContactScreen extends StatefulWidget {
   const NewContactScreen({super.key});
@@ -15,6 +16,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
       TextEditingController();
 
   final UserRepository _userRepository = UserRepository();
+  final ConversationRepository _conversationRepository =
+      ConversationRepository();
 
   final List<String> _recentSearches = [
     'usamaahmed@example.com',
@@ -22,6 +25,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
   ];
 
   bool _isSearching = false;
+  bool _isCreatingConversation = false;
+
   UserSearchResult? _searchResult;
   String? _errorMessage;
 
@@ -30,6 +35,10 @@ class _NewContactScreenState extends State<NewContactScreen> {
     _searchController.dispose();
     super.dispose();
   }
+
+  // ============================================================
+  // SEARCH USER
+  // ============================================================
 
   Future<void> _searchUser() async {
     final email = _searchController.text.trim();
@@ -64,7 +73,6 @@ class _NewContactScreenState extends State<NewContactScreen> {
         setState(() {
           _recentSearches.insert(0, email);
 
-          // Keep only the latest 5.
           if (_recentSearches.length > 5) {
             _recentSearches.removeLast();
           }
@@ -77,9 +85,11 @@ class _NewContactScreenState extends State<NewContactScreen> {
         _isSearching = false;
 
         if (e.toString().contains('USER_NOT_FOUND')) {
-          _errorMessage = 'No user found with this email.';
+          _errorMessage =
+              'No user found with this email.';
         } else if (e.toString().contains('INVALID_SEARCH')) {
-          _errorMessage = 'Please enter a valid email address.';
+          _errorMessage =
+              'Please enter a valid email address.';
         } else {
           _errorMessage =
               'Could not search for the user. Please try again.';
@@ -87,6 +97,66 @@ class _NewContactScreenState extends State<NewContactScreen> {
       });
     }
   }
+
+  // ============================================================
+  // CREATE CONVERSATION
+  // ============================================================
+
+  Future<void> _openConversation() async {
+    final user = _searchResult;
+
+    if (user == null) {
+      return;
+    }
+
+    setState(() {
+      _isCreatingConversation = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final conversationId =
+          await _conversationRepository.createConversation(
+        otherUserId: user.id,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isCreatingConversation = false;
+      });
+
+      // Open ChatScreen with the conversation ID.
+      context.push(
+        '/chat',
+        extra: {
+          'conversationId': conversationId,
+          'name': user.name,
+          'avatar': user.profilePhotoUrl ?? '',
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isCreatingConversation = false;
+        _errorMessage =
+            'Could not open conversation. Please try again.';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not create conversation: $e',
+          ),
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // RECENT SEARCH
+  // ============================================================
 
   void _selectRecentSearch(String email) {
     _searchController.text = email;
@@ -119,6 +189,10 @@ class _NewContactScreenState extends State<NewContactScreen> {
       _errorMessage = null;
     });
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -166,9 +240,9 @@ class _NewContactScreenState extends State<NewContactScreen> {
                 CrossAxisAlignment.start,
 
             children: [
-              // ================================
+              // ==================================================
               // SEARCH BOX
-              // ================================
+              // ==================================================
 
               Container(
                 height: 52,
@@ -223,6 +297,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
                                       .clear();
 
                                   _clearSearchResult();
+
+                                  setState(() {});
                                 },
                               )
                             : null,
@@ -244,9 +320,9 @@ class _NewContactScreenState extends State<NewContactScreen> {
 
               const SizedBox(height: 16),
 
-              // ================================
+              // ==================================================
               // SEARCH BUTTON
-              // ================================
+              // ==================================================
 
               SizedBox(
                 width: double.infinity,
@@ -254,7 +330,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
 
                 child: ElevatedButton(
                   onPressed:
-                      _isSearching
+                      _isSearching ||
+                              _isCreatingConversation
                           ? null
                           : _searchUser,
 
@@ -296,23 +373,23 @@ class _NewContactScreenState extends State<NewContactScreen> {
 
               const SizedBox(height: 24),
 
-              // ================================
+              // ==================================================
               // SEARCH RESULT
-              // ================================
+              // ==================================================
 
               if (_searchResult != null)
                 _buildSearchResult(),
 
-              // ================================
+              // ==================================================
               // ERROR
-              // ================================
+              // ==================================================
 
               if (_errorMessage != null)
                 _buildError(),
 
-              // ================================
+              // ==================================================
               // RECENT SEARCHES
-              // ================================
+              // ==================================================
 
               if (_searchResult == null &&
                   _errorMessage == null)
@@ -320,9 +397,9 @@ class _NewContactScreenState extends State<NewContactScreen> {
 
               const SizedBox(height: 32),
 
-              // ================================
+              // ==================================================
               // INFORMATION
-              // ================================
+              // ==================================================
 
               Container(
                 width: double.infinity,
@@ -373,6 +450,10 @@ class _NewContactScreenState extends State<NewContactScreen> {
     );
   }
 
+  // ============================================================
+  // SEARCH RESULT WIDGET
+  // ============================================================
+
   Widget _buildSearchResult() {
     final user = _searchResult!;
 
@@ -383,7 +464,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
 
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius:
+            BorderRadius.circular(18),
         border: Border.all(
           color: Colors.grey.shade200,
         ),
@@ -408,7 +490,7 @@ class _NewContactScreenState extends State<NewContactScreen> {
                       user.profilePhotoUrl!,
                       fit: BoxFit.cover,
                       errorBuilder:
-                          (_, __, ___) {
+                          (_, _, _) {
                         return const Icon(
                           Icons.person,
                           color:
@@ -465,29 +547,39 @@ class _NewContactScreenState extends State<NewContactScreen> {
             ),
           ),
 
-          IconButton(
-            icon: const Icon(
-              Icons.chat_outlined,
-              color: AppColors.primary,
-            ),
+          // ====================================================
+          // CHAT BUTTON
+          // ====================================================
 
-            onPressed: () {
-              // Conversation creation will be
-              // connected in Week 5 Day 1.
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'User found. Conversation creation comes next.',
+          IconButton(
+            onPressed:
+                _isCreatingConversation
+                    ? null
+                    : _openConversation,
+
+            icon: _isCreatingConversation
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child:
+                        CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(
+                    Icons.chat_outlined,
+                    color:
+                        AppColors.primary,
                   ),
-                ),
-              );
-            },
           ),
         ],
       ),
     );
   }
+
+  // ============================================================
+  // ERROR WIDGET
+  // ============================================================
 
   Widget _buildError() {
     return Container(
@@ -496,10 +588,13 @@ class _NewContactScreenState extends State<NewContactScreen> {
       padding: const EdgeInsets.all(18),
 
       decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
+        color:
+            Colors.red.withValues(alpha: 0.06),
+        borderRadius:
+            BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.red.withValues(alpha: 0.15),
+          color:
+              Colors.red.withValues(alpha: 0.15),
         ),
       ),
 
@@ -519,14 +614,19 @@ class _NewContactScreenState extends State<NewContactScreen> {
             style: const TextStyle(
               color: AppColors.textPrimary,
               fontSize: 14,
-              fontWeight: FontWeight.w600,
+              fontWeight:
+                  FontWeight.w600,
             ),
           ),
 
           const SizedBox(height: 10),
 
           TextButton(
-            onPressed: _searchUser,
+            onPressed:
+                _isSearching
+                    ? null
+                    : _searchUser,
+
             child: const Text(
               'Try Again',
             ),
@@ -535,6 +635,10 @@ class _NewContactScreenState extends State<NewContactScreen> {
       ),
     );
   }
+
+  // ============================================================
+  // RECENT SEARCHES
+  // ============================================================
 
   Widget _buildRecentSearches() {
     return Column(
@@ -594,7 +698,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
               borderRadius:
                   BorderRadius.circular(18),
               border: Border.all(
-                color: Colors.grey.shade200,
+                color:
+                    Colors.grey.shade200,
               ),
             ),
 
@@ -603,7 +708,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
                 Icon(
                   Icons.history,
                   size: 42,
-                  color: Colors.grey.shade400,
+                  color:
+                      Colors.grey.shade400,
                 ),
 
                 const SizedBox(height: 12),
@@ -641,7 +747,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
               borderRadius:
                   BorderRadius.circular(18),
               border: Border.all(
-                color: Colors.grey.shade200,
+                color:
+                    Colors.grey.shade200,
               ),
             ),
 
