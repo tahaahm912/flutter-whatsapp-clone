@@ -3,6 +3,11 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile/app/theme/app_colors.dart';
 import 'package:mobile/core/storage/secure_storage.dart';
 
+import '../../core/crypto/identity_key_service.dart';
+import '../../core/crypto/pre_key_service.dart';
+import '../../core/network/api_client.dart';
+import '../keys/data/services/key_api_service.dart';
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -22,6 +27,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _isLoggingOut = false;
 
+  // --------------------------------------------------------------------
+  // TEMPORARY DEBUG STATE (Week 6 testing only)
+  // --------------------------------------------------------------------
+  //
+  // Forces this account's device to (re-)upload its Signal Protocol
+  // keys right now, instead of waiting for whatever normally triggers
+  // it (Week 4, Day 5's post-registration auto-upload). Useful for
+  // confirming GET /users/:userId/keys stops returning 404/
+  // NO_KEYS_AVAILABLE for an account whose automatic upload never
+  // fired. Remove this section once that root cause is fixed.
+  // --------------------------------------------------------------------
+
+  bool _isUploadingKeys = false;
+
   Future<void> _logout() async {
     setState(() {
       _isLoggingOut = true;
@@ -40,6 +59,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Text("$title coming soon"),
       ),
     );
+  }
+
+  Future<void> _forceKeyUpload() async {
+    setState(() {
+      _isUploadingKeys = true;
+    });
+
+    try {
+      final identityKeyService = IdentityKeyService(_storage);
+      final preKeyService = PreKeyService(identityKeyService);
+      final keyApiService = KeyApiService(ApiClient());
+
+      final identityPublicKey = await preKeyService.getIdentityPublicKey();
+      final registrationId =
+          await identityKeyService.getOrCreateRegistrationId();
+
+      final signedPreKey = await preKeyService.generateSignedPreKey();
+      final oneTimePreKeys =
+          await preKeyService.generateOneTimePreKeys(count: 20);
+
+      await keyApiService.uploadPublicKeys(
+        identityKey: identityPublicKey,
+        registrationId: registrationId,
+        signedPreKey: preKeyService.signedPreKeyToJson(signedPreKey),
+        oneTimePreKeys: oneTimePreKeys
+            .map((key) => preKeyService.preKeyToJson(key))
+            .toList(),
+      );
+
+      debugPrint('FORCE KEY UPLOAD: succeeded');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Keys uploaded successfully ✅'),
+        ),
+      );
+    } catch (e) {
+      debugPrint('FORCE KEY UPLOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Key upload failed: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingKeys = false;
+        });
+      }
+    }
   }
 
   @override
@@ -211,6 +285,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // ------------------------------------------------------------
+              // TEMPORARY: DEVELOPER / WEEK 6 TESTING
+              // ------------------------------------------------------------
+              //
+              // Remove this section once every account's Signal keys
+              // upload automatically and reliably on registration.
+              // ------------------------------------------------------------
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Developer (Week 6 testing)",
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.amber.shade900,
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    Text(
+                      "Forces this account's device to upload its Signal "
+                      "Protocol keys right now.",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade900,
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed:
+                            _isUploadingKeys ? null : _forceKeyUpload,
+                        child: Text(
+                          _isUploadingKeys
+                              ? "Uploading..."
+                              : "Force Key Upload",
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 30),

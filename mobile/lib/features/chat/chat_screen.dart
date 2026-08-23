@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/crypto/session_service.dart';
+import '../../core/crypto/signal_store_provider.dart';
 import '../../core/network/api_client.dart';
 import '../../core/database/app_database.dart';
 import '../../core/storage/secure_storage.dart';
 import '../../features/chat/data/repositories/message_repository.dart';
+import '../keys/data/services/key_api_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String conversationId;
@@ -90,6 +93,19 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       // ----------------------------------------------------------
+      // Signal session service (Week 6, Day 2-4) — uses the
+      // app-wide SignalStoreProvider singleton so a session
+      // established here is still there next time this screen (or
+      // any other) is opened, for as long as the app keeps running.
+      // ----------------------------------------------------------
+
+      final sessionService = SessionService(
+        storeProvider: SignalStoreProvider.instance,
+        keyApiService: KeyApiService(_apiClient),
+        secureStorage: storage,
+      );
+
+      // ----------------------------------------------------------
       // Create MessageRepository using the actual logged-in user.
       // ----------------------------------------------------------
 
@@ -97,6 +113,7 @@ class _ChatScreenState extends State<ChatScreen> {
         apiClient: _apiClient,
         database: _database,
         currentUserId: _currentUserId!,
+        sessionService: sessionService,
       );
 
       _repositoryInitialized = true;

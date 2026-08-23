@@ -1,4 +1,5 @@
-/// Errors specific to Signal Protocol session establishment.
+/// Errors specific to Signal Protocol session establishment and
+/// encryption/decryption.
 ///
 /// Kept separate from the `Exception('SOME_CODE')` pattern used in the
 /// key-upload/search repositories, since these carry an explanation meant
@@ -35,7 +36,10 @@ class SignalSessionException implements Exception {
   ///
   /// This is a backend gap, not a Flutter one. Until it's closed, this
   /// exception is the expected, documented outcome of calling
-  /// `SessionService.establishSession`.
+  /// `SessionService.establishSession` — which now also means it's the
+  /// expected outcome of trying to send a first message to someone from
+  /// the Chat screen (Day 3 calls `establishSession` automatically if no
+  /// session exists yet).
   factory SignalSessionException.missingKyberPreKey(String remoteUserId) {
     return SignalSessionException(
       'Cannot establish a session with $remoteUserId yet: the key bundle '
@@ -44,6 +48,19 @@ class SignalSessionException implements Exception {
       'The backend needs to start serving a signed Kyber pre-key alongside '
       'the existing identity/signed/one-time pre-keys before real session '
       'establishment can succeed.',
+    );
+  }
+
+  /// Week 6, Day 3/4: thrown by `encryptMessage`/`decryptMessage` if
+  /// called before a session exists and `establishSession` wasn't run
+  /// (or failed) first. In normal use `MessageRepository.sendMessage`
+  /// calls `establishSession` for you when needed, so seeing this
+  /// usually means that call failed silently upstream — check for a
+  /// [SignalSessionException.missingKyberPreKey] earlier in the logs.
+  factory SignalSessionException.noSessionEstablished(String remoteUserId) {
+    return SignalSessionException(
+      'No Signal session exists for $remoteUserId yet. Call '
+      'establishSession($remoteUserId) first.',
     );
   }
 

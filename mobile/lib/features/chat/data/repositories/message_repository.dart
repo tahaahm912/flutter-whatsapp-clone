@@ -2,6 +2,8 @@ import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../../core/crypto/encrypted_envelope.dart';
+import '../../../../core/crypto/session_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/database/daos/messages_dao.dart';
 import '../../../../core/network/api_client.dart';
@@ -11,11 +13,13 @@ class MessageRepository {
     required this.apiClient,
     required this.database,
     required this.currentUserId,
+    required this.sessionService,
   });
 
   final ApiClient apiClient;
   final AppDatabase database;
   final String currentUserId;
+  final SessionService sessionService;
 
   MessagesDao get _messagesDao => database.messagesDao;
 
@@ -43,6 +47,18 @@ class MessageRepository {
     debugPrint('conversationId: $conversationId');
     debugPrint('currentUserId: $currentUserId');
     debugPrint('==========================================');
+
+    // ----------------------------------------------------------
+    // Who is the other participant? Needed to know which Signal
+    // session to decrypt incoming messages with (Week 6, Day 4).
+    // ----------------------------------------------------------
+
+    final conversation =
+        await database.conversationDao.getConversationById(
+      conversationId,
+    );
+
+    final otherUserId = conversation?.otherUserId;
 
     try {
       // ----------------------------------------------------------
@@ -168,10 +184,32 @@ class MessageRepository {
 
         debugPrint(
           'SERVER MESSAGE => '
-          'content=$body | '
           'senderId=$senderId | '
           'currentUserId=$currentUserId | '
           'isMe=$isMe',
+        );
+
+        // --------------------------------------------------------
+        // DECRYPT (Week 6, Day 4)
+        // --------------------------------------------------------
+        //
+        // `body` is either:
+        //  - legacy Week 5 plaintext (old test data, or a message
+        //    sent via today's plaintext fallback in sendMessage) ->
+        //    use as-is
+        //  - our own outgoing envelope, echoed back -> we already
+        //    cached the real plaintext when we sent it (sender's own
+        //    Double Ratchet ciphertext isn't decryptable with the
+        //    same session), so keep what's already stored
+        //  - the other participant's envelope -> decrypt it
+        // --------------------------------------------------------
+
+        final resolvedContent = await _resolvePlaintext(
+          messageId: messageId,
+          body: body,
+          isMe: isMe,
+          senderId: senderId,
+          otherUserId: otherUserId,
         );
 
         // --------------------------------------------------------
@@ -192,7 +230,7 @@ class MessageRepository {
                 Value(receiverId ?? ''),
 
             content:
-                Value(body),
+                Value(resolvedContent),
 
             isMe:
                 Value(isMe),
@@ -316,6 +354,58 @@ class MessageRepository {
     }
   }
 
+  /// Resolves what to actually display/store for one server message body.
+  /// See the call site above for the three cases this covers.
+  Future<String> _resolvePlaintext({
+    required String messageId,
+    required String body,
+    required bool isMe,
+    required String senderId,
+    required String? otherUserId,
+  }) async {
+    if (!EncryptedEnvelope.looksLikeEnvelope(body)) {
+      // Legacy Week 5 plaintext, or today's plaintext-fallback send —
+      // nothing to decrypt.
+      return body;
+    }
+
+    if (isMe) {
+      // Signal's send/receive chains aren't symmetric — we can't
+      // decrypt our own outgoing ciphertext with the same session.
+      // We already know what we sent; keep whatever's cached from
+      // `sendMessage` below.
+      final cached = await _messagesDao.getMessageById(messageId);
+
+      return cached?.content ??
+          '[Sent message — not available on this device]';
+    }
+
+    if (otherUserId == null || otherUserId != senderId) {
+      // Shouldn't normally happen for a direct conversation, but if the
+      // locally cached conversation doesn't match who actually sent
+      // this, we don't know which session to decrypt with.
+      debugPrint(
+        'DECRYPT SKIPPED: sender $senderId does not match cached '
+        'conversation participant $otherUserId',
+      );
+
+      return '🔒 Encrypted message (unknown sender session)';
+    }
+
+    try {
+      final envelope = EncryptedEnvelope.fromJsonString(body);
+
+      return await sessionService.decryptMessage(
+        remoteUserId: otherUserId,
+        envelope: envelope,
+      );
+    } catch (e) {
+      debugPrint('DECRYPT ERROR for message $messageId: $e');
+
+      return '🔒 Encrypted message (unable to decrypt)';
+    }
+  }
+
   // ============================================================
   // SEND MESSAGE
   // ============================================================
@@ -345,6 +435,63 @@ class MessageRepository {
     }
 
     // ----------------------------------------------------------
+    // WHO ARE WE SENDING TO? (needed to pick/build the session)
+    // ----------------------------------------------------------
+
+    final conversation =
+        await database.conversationDao.getConversationById(
+      conversationId,
+    );
+
+    final otherUserId = conversation?.otherUserId;
+
+    if (otherUserId == null || otherUserId.isEmpty) {
+      throw Exception(
+        'Cannot send: conversation $conversationId is not cached '
+        'locally, so the recipient is unknown. Load the conversation '
+        'list first.',
+      );
+    }
+
+    // ----------------------------------------------------------
+    // ENCRYPT, WITH A PLAINTEXT FALLBACK
+    // ----------------------------------------------------------
+    //
+    // Try for a real encrypted session first. If it can't be built
+    // yet — the backend not serving a Kyber pre-key
+    // (SignalSessionException), the recipient having no keys
+    // uploaded yet (NO_KEYS_AVAILABLE, a plain Exception thrown by
+    // KeyApiService), or anything else encryption can fail with —
+    // fall back to sending plaintext, same as before Week 6, instead
+    // of blocking the send entirely. This is a broad catch on
+    // purpose: whatever the specific failure, the fallback is the
+    // same. Once the backend adds Kyber support and every account's
+    // keys are reliably uploaded, this starts encrypting
+    // automatically with no further changes here.
+    // ----------------------------------------------------------
+
+    String bodyToSend;
+
+    try {
+      if (!await sessionService.hasSession(otherUserId)) {
+        await sessionService.establishSession(otherUserId);
+      }
+
+      final envelope = await sessionService.encryptMessage(
+        remoteUserId: otherUserId,
+        plaintext: trimmedText,
+      );
+
+      bodyToSend = envelope.toJsonString();
+    } catch (e) {
+      debugPrint(
+        'ENCRYPTION UNAVAILABLE, sending as plaintext: $e',
+      );
+
+      bodyToSend = trimmedText;
+    }
+
+    // ----------------------------------------------------------
     // CLIENT MESSAGE ID
     // ----------------------------------------------------------
 
@@ -368,11 +515,11 @@ class MessageRepository {
     );
 
     debugPrint(
-      'body: $trimmedText',
+      'clientMessageId: $clientMessageId',
     );
 
     debugPrint(
-      'clientMessageId: $clientMessageId',
+      'bodyToSend length: ${bodyToSend.length}',
     );
 
     debugPrint(
@@ -389,7 +536,7 @@ class MessageRepository {
       data: {
         'conversation_id': conversationId,
         'client_message_id': clientMessageId,
-        'body': trimmedText,
+        'body': bodyToSend,
       },
     );
 
@@ -422,9 +569,6 @@ class MessageRepository {
 
     final returnedClientMessageId =
         messageData['client_message_id']?.toString();
-
-    final body =
-        messageData['body']?.toString();
 
     final createdAt =
         messageData['created_at']?.toString();
@@ -469,12 +613,6 @@ class MessageRepository {
       );
     }
 
-    if (body == null) {
-      throw Exception(
-        'Message response is missing body',
-      );
-    }
-
     if (createdAt == null ||
         createdAt.isEmpty) {
       throw Exception(
@@ -504,7 +642,6 @@ class MessageRepository {
 
     debugPrint(
       'SENT MESSAGE => '
-      'content=$body | '
       'senderId=$senderId | '
       'currentUserId=$currentUserId | '
       'isMe=$isMe',
@@ -513,6 +650,10 @@ class MessageRepository {
     // ----------------------------------------------------------
     // CREATE MESSAGE
     // ----------------------------------------------------------
+    //
+    // Use the real plaintext we already have, NOT the server's
+    // echoed-back body (which may be an encrypted envelope).
+    // ----------------------------------------------------------
 
     final message = Message(
       id: 0,
@@ -520,7 +661,7 @@ class MessageRepository {
       conversationId: returnedConversationId,
       senderId: senderId,
       receiverId: receiverId ?? '',
-      content: body,
+      content: trimmedText,
       isMe: isMe,
       sentAt: parsedCreatedAt,
       createdAt: parsedCreatedAt,
